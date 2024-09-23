@@ -224,7 +224,7 @@ class Ask(commands.Cog):
 
         # Check if the question starts with "Create"
         if question.strip().lower().startswith("create"):
-            prompt = question.strip()[len("create"):].strip()  # Replace trim() with strip()
+            prompt = question.strip()[len("create"):].strip()
             if not prompt:
                 await ctx.send(f"@{ctx.author.name}, please provide a prompt after 'Create'.")
                 return
@@ -258,21 +258,19 @@ class Ask(commands.Cog):
             # Remove duplicate sentences before splitting the message
             cleaned_answer = self.remove_duplicate_sentences(answer)
             
-            messages = self.split_message(
-                message=cleaned_answer,
-                max_length=500 - len(username_mention),  # Reserve space for the prefix in the first message
-                max_chunks=2
-            )
-            
-            if messages:
-                # Prepend the username mention to the first chunk
-                messages[0] = f"{username_mention}{messages[0]}"
-                
-                # Send each message chunk
-                for msg in messages:
-                    await ctx.send(msg)
+            # Only split if necessary
+            if len(cleaned_answer) + len(username_mention) > 500:
+                messages = self.split_message(
+                    message=cleaned_answer,  # Use cleaned answer without duplicates
+                    max_length=500 - len(username_mention),  # Reserve space for the prefix in the first message
+                    max_chunks=2
+                )
             else:
-                await ctx.send(f"@{ctx.author.name}, I couldn't process your request.")
+                messages = [f"{username_mention}{cleaned_answer}"]
+
+            # Send each message chunk without duplication
+            for msg in messages:
+                await ctx.send(msg)
         else:
             await ctx.send(f"@{ctx.author.name}, an error occurred while processing your request.")
 
