@@ -1,0 +1,32 @@
+# .gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+*.env
+
+# Logs
+*.log
+
+# Virtual Environment
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# GitHub Actions
+.github/workflows/python-app.yml
+
+# MacOS
+.DS_Store
