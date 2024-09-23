@@ -38,14 +38,15 @@ class TwitchBot(commands.Bot):
         logger.setLevel(logging.DEBUG)  # Set to DEBUG for verbose logging
 
         # Create handlers with utf-8 encoding
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)  # Capture DEBUG and above in console
-        console_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s'))
-        console_handler.stream = open(console_handler.stream.fileno(), mode='w', encoding='utf-8', buffering=1)
+        console_formatter = logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s')
+        console_handler.setFormatter(console_formatter)
 
         file_handler = logging.FileHandler('bot.log', encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)  # Capture DEBUG and above in log file
-        file_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s'))
+        file_formatter = logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s')
+        file_handler.setFormatter(file_formatter)
 
         # Add handlers to the logger
         logger.addHandler(console_handler)
@@ -100,6 +101,9 @@ class TwitchBot(commands.Bot):
 
 # Instantiate and run the bot
 if __name__ == '__main__':
+    # Set the console code page to UTF-8 to handle Unicode characters
+    os.system('chcp 65001 > nul')
+
     try:
         bot = TwitchBot()
         bot.run()
