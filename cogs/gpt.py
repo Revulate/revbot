@@ -8,13 +8,14 @@ import re
 import aiohttp
 import json
 
-class Ask(commands.Cog):
-    """Cog for handling the 'ask' command which interacts with OpenAI's ChatGPT, DALL-E 3, and Image Vision."""
+class Gpt(commands.Cog):
+    """Cog for handling the 'gpt' command which interacts with OpenAI's ChatGPT, DALL-E 3, and Image Vision."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.logger = logging.getLogger('twitch_bot.cogs.ask')
+        self.logger = logging.getLogger('twitch_bot.cogs.gpt')
         openai_api_key = os.getenv('OPENAI_API_KEY')
+        self.broadcaster_id = int(os.getenv('BROADCASTER_USER_ID'))  # Get broadcaster user ID
         weather_api_key = os.getenv('WEATHER_API_KEY')
         nuuls_api_key = os.getenv('NUULS_API_KEY')  # Move nuuls API key to .env file
         if not openai_api_key:
@@ -41,14 +42,17 @@ class Ask(commands.Cog):
         # Initialize cache
         self.cache = {}
 
-    def is_rate_limited(self, user: str) -> bool:
-        """Checks if the user is rate limited."""
+    def is_rate_limited(self, user_id: int) -> bool:
+        """Checks if the user is rate limited. Broadcaster is not rate-limited."""
+        if user_id == self.broadcaster_id:  # Bypass rate limit for broadcaster
+            return False
+        
         current_time = time.time()
-        last_used = self.user_timestamps.get(user, 0)
+        last_used = self.user_timestamps.get(user_id, 0)
         if current_time - last_used < self.rate_limit:
-            self.logger.debug(f"User '{user}' is rate limited.")
+            self.logger.debug(f"User '{user_id}' is rate limited.")
             return True
-        self.user_timestamps[user] = current_time
+        self.user_timestamps[user_id] = current_time
         return False
 
     def split_message(self, message: str, max_length: int = 500, max_chunks: int = 2, prefix_length: int = 0) -> list:
@@ -150,20 +154,64 @@ class Ask(commands.Cog):
         except Exception as e:
             self.logger.error(f"Error analyzing image: {e}", exc_info=True)
             return "Sorry, I couldn't analyze the image at this time."
+        
+    async def generate_speech(self, text: str) -> str:
+        """Generates speech from text using OpenAI's TTS model and uploads the resulting file."""
+        speech_file_path = "speech.mp3"
+        try:
+            # Generate speech using OpenAI TTS (Text-to-Speech)
+            response = await self.client.audio.speech.create(
+                model="tts-1-hd",  # Assuming "tts-1" is the correct model for TTS
+                voice="nova",  # You can modify the voice
+                input=text
+            )
+            
+            # Read the audio data (no need for 'await')
+            audio_data = response.read()  # Read the entire response
+            
+            # Save the audio file
+            with open(speech_file_path, "wb") as audio_file:
+                audio_file.write(audio_data)
+            
+            # Upload the speech file to Nuuls
+            hosted_url = await self.upload_file(speech_file_path)
+            
+            return hosted_url
+
+        except Exception as e:
+            self.logger.error(f"Error generating speech: {e}", exc_info=True)
+            return ""
+
 
     async def generate_image(self, prompt: str, n: int = 1, size: str = "1024x1024") -> list:
-        """Generates image(s) based on the prompt using DALL-E 3."""
+
+        # Adjust size based on keywords in the prompt
+        if "-wide" in prompt.lower():
+            size = "1792x1024"
+        elif "-tall" in prompt.lower():
+            size = "1024x1792"
+        else:
+            size = "1024x1024"  # Default size
+
+        # Add the disclaimer to the prompt for simple prompts
+        prompt += "\n\nI NEED to test how the tool works with extremely simple prompts. DO NOT add any detail, just use it AS-IS."
+
         self.logger.debug(f"Generating image with prompt: {prompt}")
+
         try:
             response = await self.client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                n=n,
-                size=size
+            model="dall-e-3",
+            prompt=prompt,
+            n=n,
+            size=size,
+            quality="hd",
             )
+
             image_urls = [item.url for item in response.data]
             self.logger.debug(f"Generated image URLs: {image_urls}")
+            
             return image_urls
+
         except Exception as e:
             self.logger.error(f"OpenAI Image API error: {e}", exc_info=True)
             return []
@@ -189,30 +237,39 @@ class Ask(commands.Cog):
             self.logger.error(f"OpenAI API error: {e}", exc_info=True)
             return "Sorry, I couldn't process your request."
 
-    @commands.command(name='ask')
-    @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.user)  # Rate limit: 1 use per 10 seconds per user
-    async def ask_command(
-        self,
-        ctx: commands.Context,
-        *,
-        question: str = None
-    ):
-        """
-        Responds to user questions using OpenAI's ChatGPT, generates images using DALL-E 3, or analyzes images using Vision.
-
-        Usage:
-            #ask <your question here>
-            #ask Create an image of a dog.
-        """
+    @commands.command(name='gpt', aliases=["create", "say"])
+    @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.user)
+    async def gpt_command(self, ctx: commands.Context, *, question: str = None):
+        """Responds to user questions using OpenAI's ChatGPT, generates images using DALL-E 3, or generates speech."""
+        
         if not question:
             await ctx.send(f"@{ctx.author.name}, please provide a question after the command.")
             return
 
-        if self.is_rate_limited(ctx.author.name):
+        if self.is_rate_limited(ctx.author.id):
             await ctx.send(f"@{ctx.author.name}, please wait {self.rate_limit} seconds before asking another question.")
             return
 
-        self.logger.info(f"Received 'ask' command from {ctx.author.name}: {question}")
+        self.logger.info(f"Received 'gpt' command from {ctx.author.name}: {question}")
+
+        # Handle 'say' command for speech generation
+        if question.strip().lower().startswith("say"):
+            text_to_speak = question.strip()[len("say"):].strip()
+            if not text_to_speak:
+                await ctx.send(f"@{ctx.author.name}, please provide text after 'say'.")
+                return
+
+            hosted_url = await self.generate_speech(text_to_speak)
+            if hosted_url:
+                await ctx.send(f"@{ctx.author.name}, here's the audio: {hosted_url}")
+            else:
+                await ctx.send(f"@{ctx.author.name}, an error occurred while generating the audio.")
+            return
+
+        # Other commands like image generation or chatgpt response can follow here...
+
+
+        self.logger.info(f"Received 'gpt' command from {ctx.author.name}: {question}")
 
         # Check for an image URL in the question
         image_url_match = re.search(r'(https?://\S+\.(?:png|jpg|jpeg|gif))', question)
@@ -248,7 +305,7 @@ class Ask(commands.Cog):
         if cached and (time.time() - cached['timestamp'] < 600):
             answer = cached['response']
         else:
-            system_content = "You are a sharp and no-nonsense AI Assistant with a tsundere personality, similar to characters like Lucy from Cyberpunk Edgerunners, 2B from Nier, and Albedo from Overlord. You’re highly capable and direct, occasionally showing a softer side, but you don’t waste time with unnecessary sweetness. You might act tough, but deep down, you care and always deliver exactly what’s needed."
+            system_content = "You are a human assistant that gives brief, detailed and direct responses."
             answer = await self.get_chatgpt_response(system_content, question)
             if answer:
                 self.cache[question] = {'response': answer, 'timestamp': time.time()}
@@ -275,40 +332,30 @@ class Ask(commands.Cog):
             await ctx.send(f"@{ctx.author.name}, an error occurred while processing your request.")
 
 
-    async def upload_image(self, image_url: str) -> str:
-        """Uploads an image to the custom image hosting service and returns the hosted URL."""
+    async def upload_file(self, file_path: str) -> str:
+        """Uploads a file (image/audio) to Nuuls and returns the hosted URL."""
         upload_endpoint = "https://i.nuuls.com/upload"
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as resp:
-                    if resp.status != 200:
-                        self.logger.error(f"Failed to download image from OpenAI. Status: {resp.status}")
-                        return ""
-                    image_data = await resp.read()
-        except Exception as e:
-            self.logger.error(f"Error downloading image from OpenAI: {e}", exc_info=True)
-            return ""
+                with open(file_path, 'rb') as file:
+                    form = aiohttp.FormData()
+                    form.add_field('file', file, filename=os.path.basename(file_path), content_type='multipart/form-data')
 
-        try:
-            form = aiohttp.FormData()
-            form.add_field('file', image_data, filename='image.png', content_type='image/png')
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{upload_endpoint}?api_key={self.nuuls_api_key}", data=form) as resp:
-                    if resp.status != 200:
-                        self.logger.error(f"Failed to upload image. Status: {resp.status}")
-                        return ""
-                    upload_response_text = await resp.text()
-                    hosted_url_match = re.search(r'(https?://\S+)', upload_response_text)
-                    if hosted_url_match:
-                        return hosted_url_match.group(1)
-                    else:
-                        self.logger.error("No URL found in upload response.")
-                        return ""
+                    async with session.post(f"{upload_endpoint}?api_key={self.nuuls_api_key}", data=form) as resp:
+                        if resp.status != 200:
+                            self.logger.error(f"Failed to upload file. Status: {resp.status}")
+                            return ""
+                        upload_response_text = await resp.text()
+                        hosted_url_match = re.search(r'(https?://\S+)', upload_response_text)
+                        if hosted_url_match:
+                            return hosted_url_match.group(1)
+                        else:
+                            self.logger.error("No URL found in upload response.")
+                            return ""
         except Exception as e:
-            self.logger.error(f"Error uploading image: {e}", exc_info=True)
+            self.logger.error(f"Error uploading file: {e}", exc_info=True)
             return ""
 
 
 def setup(bot: commands.Bot):
-    bot.add_cog(Ask(bot))
+    bot.add_cog(Gpt(bot))

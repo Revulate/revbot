@@ -1,4 +1,3 @@
-# bot.py
 import os
 import logging
 import sys
@@ -69,25 +68,39 @@ class TwitchBot(commands.Bot):
             self.logger.error(f"Error fetching user data: {e}", exc_info=True)
 
         # Manually add cogs without using load_extension
-        from cogs.ask import Ask
-        self.add_cog(Ask(self))
-        self.logger.info("Added cog: Ask")
+        from cogs.gpt import Gpt
+        self.add_cog(Gpt(self))
+        self.logger.info("Added cog: Gpt")
+
+        from cogs.roll import Roll
+        self.add_cog(Roll(self))
+        self.logger.info("Added cog: Roll")
+
+        from cogs.rate import Rate
+        self.add_cog(Rate(self))
+        self.logger.info("Added cog: Rate")
 
     async def event_message(self, message):
         if message.echo:
             return
+        
+        # Log the channel, user, and message
+        self.logger.debug(f"#{message.channel.name} - {message.author.name}: {message.content}")
+        
         await self.handle_commands(message)
+
 
     async def event_command_error(self, context: commands.Context, error: Exception):
         if isinstance(error, commands.CommandNotFound):
             # Optionally, notify the user or silently ignore
+            self.logger.warning(f"Command not found: {context.message.content}")
             return
 
         elif isinstance(error, commands.ArgumentParsingFailed):
-            await context.send(error.message)
+            await context.send(f"{error.message}")
 
         elif isinstance(error, commands.MissingRequiredArgument):
-            await context.send(f"@{context.author.name}, you're missing an argument: `{error.param.name}`.")
+            await context.send(f"@{context.author.name}, you're missing a required argument for the command.")
 
         elif isinstance(error, commands.CheckFailure):
             await context.send(f"@{context.author.name}, you don't have permission to use that command.")
@@ -98,6 +111,7 @@ class TwitchBot(commands.Bot):
         else:
             self.logger.error(f"Unhandled exception: {error}", exc_info=True)
             await context.send(f"@{context.author.name}, an unexpected error occurred. Please try again later.")
+
 
 # Instantiate and run the bot
 if __name__ == '__main__':
