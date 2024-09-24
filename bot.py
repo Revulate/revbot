@@ -1,5 +1,6 @@
 import os
 import sys
+import logging  # Ensure logging is imported
 from twitchio.ext import commands
 from dotenv import load_dotenv
 from logger import setup_logger  # Import the logger from logger.py
@@ -14,7 +15,7 @@ class TwitchBot(commands.Bot):
 
         # Retrieve environment variables
         token = os.getenv('TWITCH_OAUTH_TOKEN')
-        prefix = os.getenv('COMMAND_PREFIX', '!')
+        prefix = os.getenv('COMMAND_PREFIX', '#')  # Changed default prefix to '#'
         channels = os.getenv('TWITCH_CHANNELS', '')
 
         # Check if essential environment variables are set
@@ -26,6 +27,7 @@ class TwitchBot(commands.Bot):
             prefix=prefix,
             initial_channels=[channel.strip() for channel in channels.split(',') if channel.strip()]
         )
+        self.bot_user_id = None  # Initialize the attribute with a different name to avoid conflicts
 
     def check_environment_variables(self, token, channels):
         """Check for missing environment variables and exit if any are missing."""
@@ -51,7 +53,8 @@ class TwitchBot(commands.Bot):
             users = await self.fetch_users([self.nick])
             if users:
                 user_id = users[0].id
-                self.logger.info(f'User ID is | {user_id}')
+                self.bot_user_id = user_id  # Set the bot's user ID with the new attribute name
+                self.logger.info(f'User ID is | {self.bot_user_id}')
             else:
                 self.logger.error("Failed to fetch user data.")
         except Exception as e:
@@ -62,9 +65,12 @@ class TwitchBot(commands.Bot):
         cogs = ['Gpt', 'Roll', 'Rate', 'Create', 'Afk']
         for cog in cogs:
             if cog not in self.cogs:
-                module = __import__(f'cogs.{cog.lower()}', fromlist=[cog])
-                self.add_cog(module.__dict__[cog](self))
-                self.logger.info(f"Added cog: {cog}")
+                try:
+                    module = __import__(f'cogs.{cog.lower()}', fromlist=[cog])
+                    self.add_cog(module.__dict__[cog](self))
+                    self.logger.info(f"Added cog: {cog}")
+                except Exception as e:
+                    self.logger.error(f"Failed to add cog {cog}: {e}", exc_info=True)
 
     async def event_message(self, message):
         """Process incoming messages and handle commands."""
@@ -72,6 +78,11 @@ class TwitchBot(commands.Bot):
             self.log_missing_data(message)
             return
         
+        # Prevent the bot from responding to its own messages
+        if self.bot_user_id and message.author.id == self.bot_user_id:
+            self.logger.debug(f"Ignored message from bot itself: {message.content}")
+            return
+
         self.logger.debug(f"Processing message from #{message.channel.name} - {message.author.name}: {message.content}")
         
         if message.echo:

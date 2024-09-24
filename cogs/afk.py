@@ -10,6 +10,27 @@ class Afk(commands.Cog):
         self._setup_database()
         self.last_afk_command_time = {}
         self.last_afk_message_time = {}
+        self.prefixes = self._get_prefixes()
+
+    def _get_prefixes(self):
+        """
+        Retrieve the list of prefixes from the bot.
+        If the bot has a 'prefix' attribute, use it.
+        If not, check for '_prefix'.
+        If neither exists, return a default prefix.
+        """
+        if hasattr(self.bot, 'prefix'):
+            prefix = self.bot.prefix
+        elif hasattr(self.bot, '_prefix'):
+            prefix = self.bot._prefix
+        else:
+            prefix = '#'
+
+        # Ensure prefixes are in a list
+        if isinstance(prefix, list):
+            return prefix
+        else:
+            return [prefix]
 
     def _setup_database(self):
         conn = sqlite3.connect(self.db_path)
@@ -25,47 +46,51 @@ class Afk(commands.Cog):
         conn.commit()
         conn.close()
 
-    def format_afk_message(self, username, reason, weeks, days, hours, minutes, seconds):
-        if reason.lower().startswith("sleeping"):
-            afk_text = "is now sleeping"
-        elif reason.lower().startswith("working"):
-            afk_text = "is now working"
-        elif reason.lower().startswith("gaming"):
-            afk_text = "is now gaming"
-        elif reason.lower().startswith("eating"):
-            afk_text = "is now eating"
-        else:
-            afk_text = "is now AFK"
-
-        if weeks > 0:
-            return f"@{username} {afk_text} ({int(weeks)}w, {int(days)}d ago)"
-        elif days > 0:
-            return f"@{username} {afk_text} ({int(days)}d, {int(hours)}h ago)"
-        elif hours > 0:
-            return f"@{username} {afk_text} ({int(hours)}h, {int(minutes)}m ago)"
-        elif minutes > 0:
-            return f"@{username} {afk_text} ({int(minutes)}m, {int(seconds)}s ago)"
-        else:
-            return f"@{username} {afk_text} ({int(seconds)}s ago)"
-
     @commands.command(name="afk", aliases=["sleep", "gn", "work", "food", "gaming", "bed"])
     async def afk_command(self, ctx: commands.Context, *, reason: str = None):
         user_id = ctx.author.id
         username = ctx.author.name
 
-        alias = ctx.command.name.lower()
+        # Determine the prefix used in the message
+        message_content = ctx.message.content
+        prefix_used = None
+        for prefix in self.prefixes:
+            if message_content.startswith(prefix):
+                prefix_used = prefix
+                break
+
+        if not prefix_used:
+            # Default prefix if not found, adjust as necessary
+            prefix_used = '#'
+
+        # Extract the command used by parsing the message content
+        try:
+            command_with_prefix = message_content.split()[0]  # e.g., "#gn"
+            command_used = command_with_prefix[len(prefix_used):].lower()  # e.g., "gn"
+        except IndexError:
+            # If the message is just the prefix without a command
+            await ctx.send(f"@{username}, please provide a reason for going AFK.")
+            return
+
         base_reason = {
+            "afk": "AFK",
             "sleep": "sleeping",
             "gn": "sleeping",
             "bed": "sleeping",
             "work": "working",
             "food": "eating",
             "gaming": "gaming"
-        }.get(alias, "afk")
+        }.get(command_used, "AFK")  # Default to "AFK" if alias not found
 
-        full_reason = f"{base_reason}: {reason}" if reason else base_reason
+        # Construct the full reason with user-provided details if any
+        if reason:
+            full_reason = f"{base_reason}: {reason}"
+        else:
+            full_reason = base_reason
+
         afk_time = time.time()
 
+        # Insert or update the AFK status in the database
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
@@ -75,8 +100,9 @@ class Afk(commands.Cog):
         conn.commit()
         conn.close()
 
+        # Update the last AFK command time to prevent immediate response upon setting AFK
         self.last_afk_command_time[user_id] = time.time()
-        await ctx.send(f"@{username} is now {full_reason}.")
+        await ctx.send(f"@{username} is now {full_reason}")
 
     @commands.Cog.event()
     async def event_message(self, message):
@@ -90,11 +116,17 @@ class Afk(commands.Cog):
         user_id = message.author.id
         username = message.author.name
 
+        # Prevent the cog from responding to its own messages
+        if hasattr(self.bot, 'bot_user_id') and message.author.id == self.bot.bot_user_id:
+            return
+
+        # Prevent responding to AFK command itself
         if user_id in self.last_afk_command_time:
             time_since_last_afk_command = time.time() - self.last_afk_command_time[user_id]
             if time_since_last_afk_command < 3:
                 return
 
+        # Check if the user is currently AFK
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('SELECT afk_time, reason FROM afk WHERE user_id = ?', (user_id,))
@@ -103,26 +135,43 @@ class Afk(commands.Cog):
 
         if row:
             afk_time = row[0]
-            reason = row[1]
+            full_reason = row[1]
             afk_duration = Watch.get_afk_duration(afk_time)
             weeks, days, hours, minutes, seconds = Watch.format_duration(afk_duration)
 
-            afk_message = self.format_afk_message(username, reason, weeks, days, hours, minutes, seconds)
+            # Parse the full_reason into base_reason and user_reason
+            if ': ' in full_reason:
+                base_reason, user_reason = full_reason.split(': ', 1)
+            else:
+                base_reason = full_reason
+                user_reason = None
 
+            # Format the "no longer AFK" message based on whether a reason was provided
+            if user_reason:
+                no_longer_afk_message = f"@{username} is no longer {base_reason}: {user_reason} ({seconds:.2f}s ago)"
+            else:
+                no_longer_afk_message = f"@{username} is no longer {base_reason}. ({seconds:.2f}s ago)"
+
+            # Check if a "no longer AFK" message was recently sent to prevent spamming
             if user_id in self.last_afk_message_time:
                 time_since_last_message = time.time() - self.last_afk_message_time[user_id]
                 if time_since_last_message < 3:
                     return
 
-            # Correct the message sent when returning from AFK
-            await message.channel.send(f"@{username} is no longer AFK ({int(seconds)}s ago)")
+            # Send the "no longer AFK" message
+            await message.channel.send(no_longer_afk_message)
             self.last_afk_message_time[user_id] = time.time()
 
+            # Remove the user's AFK status from the database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM afk WHERE user_id = ?', (user_id,))
             conn.commit()
             conn.close()
+
+    def log_missing_data(self, message):
+        # Implement logging for missing data if necessary
+        print(f"Missing data in message: {message.content} from {message.author.name if message.author else 'Unknown'}")
 
 def setup(bot: commands.Bot):
     bot.add_cog(Afk(bot))
