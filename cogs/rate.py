@@ -1,6 +1,7 @@
 import random
 import logging
 from twitchio.ext import commands
+import re
 
 class Rate(commands.Cog):
     """Cog for handling various rate-based commands like 'cute', 'gay', 'iq', etc.'"""
@@ -16,6 +17,35 @@ class Rate(commands.Cog):
         else:
             mentioned_user = ctx.author.name
         return f"@{mentioned_user}"
+
+    def split_message(self, message: str, max_length: int = 500) -> list:
+        """
+        Splits a message into chunks that fit within the specified max_length.
+        """
+        chunks = []
+        sentences = re.split(r'(?<=[.!?]) +', message)  # Split by sentences
+        current_chunk = ""
+        
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= max_length:
+                if current_chunk:
+                    current_chunk += " " + sentence
+                else:
+                    current_chunk = sentence
+            else:
+                chunks.append(current_chunk)
+                current_chunk = sentence
+        
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks
+
+    async def send_split_message(self, ctx: commands.Context, message: str):
+        """Splits a long message and sends each chunk separately."""
+        messages = self.split_message(message)
+        for msg in messages:
+            await ctx.send(msg)
 
     @commands.command(name="cute")
     async def cute_command(self, ctx: commands.Context, *, mentioned_user: str = None):
@@ -85,7 +115,7 @@ class Rate(commands.Cog):
         """Returns a random IQ score and adds a comment based on the result."""
         user = self.get_mentioned_user(ctx, mentioned_user)
         iq = random.randint(0, 200)
-        iq_description = "thoughtless" if iq <= 50 else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 119 else "BrainGalaxy"
+        iq_description = "thoughtless" if iq <= 50 else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
         response = f"{user} has {iq} IQ. {iq_description}"
         self.logger.info(f"IQ command result: {response}")
         await ctx.send(response)
@@ -101,19 +131,95 @@ class Rate(commands.Cog):
 
     @commands.command(name="all")
     async def all_command(self, ctx: commands.Context, *, mentioned_user: str = None):
-        """Runs all rate commands for a user."""
+        """Runs all rate commands for a user and sends each result as its own message."""
         user = self.get_mentioned_user(ctx, mentioned_user)
         self.logger.info(f"Running all rate commands for {user}")
 
-        # Call each command directly with the necessary context
-        await self.cute_command(ctx, mentioned_user=user)
-        await self.gay_command(ctx, mentioned_user=user)
-        await self.straight_command(ctx, mentioned_user=user)
-        await self.myd_command(ctx, mentioned_user=user)
-        await self.rate_command(ctx, mentioned_user=user)
-        await self.horny_command(ctx, mentioned_user=user)
-        await self.iq_command(ctx, mentioned_user=user)
-        await self.sus_command(ctx, mentioned_user=user)
+        # Each result is added and sent separately
+        cute = random.randint(0, 100)
+        await ctx.send(f"{user} is {cute}% cute. {'MenheraCute' if cute >= 50 else 'SadgeCry'}")
+
+        gay_percentage = random.randint(0, 100)
+        await ctx.send(f"{user} is {gay_percentage}% gay. {'Gayge' if gay_percentage > 50 else '📏'}")
+
+        straight_percentage = random.randint(0, 100)
+        await ctx.send(f"{user} is {straight_percentage}% straight. {'📏' if straight_percentage > 50 else 'Hmm'}")
+
+        length_inches = random.choices([random.randint(0, 11), random.randint(12, 24)], weights=[90, 10])[0]
+        girth_inches = random.randint(1, 12)
+        if length_inches >= 12:
+            feet = length_inches // 12
+            inches = length_inches % 12
+            length_str = f"{feet}ft {inches}in"
+        else:
+            length_str = f"{length_inches}in"
+        await ctx.send(f"{user} 's pp is {length_str} long and has a {girth_inches}in girth. BillyApprove")
+
+        rating = random.randint(0, 10)
+        await ctx.send(f"{user} is a {rating}/10. {'CHUG' if rating > 5 else 'Hmm'}")
+
+        horny_percentage = random.randint(0, 100)
+        await ctx.send(f"{user} is {horny_percentage}% horny right now. {'HORNY' if horny_percentage > 50 else 'Hmm'}")
+
+        iq = random.randint(0, 200)
+        iq_description = "thoughtless" if iq <= 50 else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
+        await ctx.send(f"{user} has {iq} IQ. {iq_description}")
+
+        sus_percentage = random.randint(0, 100)
+        await ctx.send(f"{user} is {sus_percentage}% sus! {'SUSSY' if sus_percentage > 50 else 'Hmm'}")
+
+    @commands.command(name="ball")
+    async def ball_command(self, ctx: commands.Context, *, mentioned_user: str = None):
+        """Provides a brief summary of all rate commands in one message."""
+        user = self.get_mentioned_user(ctx, mentioned_user)
+        self.logger.info(f"Running brief summary rate commands for {user}")
+
+        # Generate all the random percentages and values for each category
+        cute = random.randint(0, 100)
+        gay_percentage = random.randint(0, 100)
+        straight_percentage = random.randint(0, 100)
+        length_inches = random.choices([random.randint(0, 11), random.randint(12, 24)], weights=[90, 10])[0]
+        girth_inches = random.randint(1, 12)
+        rating = random.randint(0, 10)
+        horny_percentage = random.randint(0, 100)
+        iq = random.randint(0, 200)
+        sus_percentage = random.randint(0, 100)
+
+        # Format the pp size
+        if length_inches >= 12:
+            feet = length_inches // 12
+            inches = length_inches % 12
+            length_str = f"{feet}ft {inches}in"
+        else:
+            length_str = f"{length_inches}in"
+
+        # Determine variations based on the result
+        cute_response = 'MenheraCute ' if cute >= 50 else 'SadgeCry '
+        gay_response = 'Gayge' if gay_percentage > 50 else 'Gayge '
+        horny_response = 'HORNY ' if horny_percentage > 50 else 'despair '
+        sus_response = 'SUSSY ' if sus_percentage > 50 else 'Hmm '
+        iq_description = (
+            "thoughtless" if iq <= 50 else
+            "a slowpoke" if iq <= 80 else
+            "an NPC" if iq <= 115 else
+            "a catNerd" if iq <= 199 else
+            "a BrainGalaxy"
+        )
+        rate_response = 'CHUG ' if rating > 5 else 'Hmm '
+
+        # Create a coherent summary with variations (without extra parentheses where not needed)
+        response = (
+            f"{user} is {cute}% cute {cute_response}, {gay_percentage}% gay {gay_response}, and {straight_percentage}% 📏. "
+            f"Their kok is {length_str} long with a {girth_inches}in girth. "
+            f"I would rate them {rating}/10 {rate_response}. Right now, they are {horny_percentage}% horny {horny_response}. "
+            f"With an IQ of {iq}, they are {iq_description}. "
+            f"They are also {sus_percentage}% {sus_response}."
+        )
+
+        # Log and send the response
+        self.logger.info(f"Brief summary command result: {response}")
+        await ctx.send(response)
+
 
 def setup(bot: commands.Bot):
     bot.add_cog(Rate(bot))
