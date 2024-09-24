@@ -1,7 +1,7 @@
 import sqlite3
 from twitchio.ext import commands
 import time
-from watch import Watch  # Import the Watch class
+from watch import Watch  # Ensure this import is correct and Watch is properly defined
 
 class Afk(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -102,7 +102,7 @@ class Afk(commands.Cog):
 
         # Update the last AFK command time to prevent immediate response upon setting AFK
         self.last_afk_command_time[user_id] = time.time()
-        await ctx.send(f"@{username} is now {full_reason}")
+        await ctx.send(f"@{username} is now {full_reason}.")
 
     @commands.Cog.event()
     async def event_message(self, message):
@@ -171,7 +171,10 @@ class Afk(commands.Cog):
 
     def log_missing_data(self, message):
         # Implement logging for missing data if necessary
-        print(f"Missing data in message: {message.content} from {message.author.name if message.author else 'Unknown'}")
+        self.bot.logger.warning(
+            f"Received a message with missing data. Content: {getattr(message, 'content', 'None')}, "
+            f"Channel: {getattr(message.channel, 'name', 'None')}"
+        )
 
 def setup(bot: commands.Bot):
     bot.add_cog(Afk(bot))

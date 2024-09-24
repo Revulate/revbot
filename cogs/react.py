@@ -20,7 +20,7 @@ class React(commands.Cog):
         self.bot.logger.debug(f"Received message: {message.content} from {message.author.name}")
 
         # Ignore messages from the bot itself to prevent loops
-        if message.echo:
+        if message.echo or message.author.id == self.bot.bot_user_id:
             self.bot.logger.debug("Ignoring bot's own message.")
             return
 
@@ -54,14 +54,10 @@ class React(commands.Cog):
             self.last_reply_time[user_id] = current_time  # Update the last reply time
             self.bot.logger.debug(f"Replied to {message.author.name}")
 
-
         # Check if StreamElements is running a raffle
         if message.author.name.lower() == "streamelements" and "The Multi-Raffle for 5000 points will end in 15 Seconds" in message.content:
             await message.channel.send("!jOIn")
             self.bot.logger.debug("Automatically joined the raffle with !jOIn")
-
-        # Process commands if it's a command message
-        await self.bot.handle_commands(message)
 
 def setup(bot: commands.Bot):
     bot.add_cog(React(bot))

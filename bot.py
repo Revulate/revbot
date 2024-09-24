@@ -62,7 +62,7 @@ class TwitchBot(commands.Bot):
 
     async def load_cogs(self):
         """Load all cogs into the bot."""
-        cogs = ['Gpt', 'Roll', 'Rate', 'Create', 'Afk']
+        cogs = ['Gpt', 'Roll', 'Rate', 'Create', 'Afk', 'React']
         for cog in cogs:
             if cog not in self.cogs:
                 try:
@@ -90,6 +90,7 @@ class TwitchBot(commands.Bot):
             return
         
         await self.handle_commands(message)
+
 
     def log_missing_data(self, message):
         """Log missing data in message."""
