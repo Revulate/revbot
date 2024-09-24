@@ -1,62 +1,52 @@
 import os
-import logging
 import sys
 from twitchio.ext import commands
 from dotenv import load_dotenv
+from logger import setup_logger  # Import the logger from logger.py
 
 # Load environment variables from .env file
 load_dotenv()
 
 class TwitchBot(commands.Bot):
     def __init__(self):
+        # Set up the logger
+        self.logger = setup_logger()
+
         # Retrieve environment variables
         token = os.getenv('TWITCH_OAUTH_TOKEN')
         prefix = os.getenv('COMMAND_PREFIX', '!')
         channels = os.getenv('TWITCH_CHANNELS', '')
 
         # Check if essential environment variables are set
-        missing_vars = []
-        if not token:
-            missing_vars.append('TWITCH_OAUTH_TOKEN')
-        if not channels:
-            missing_vars.append('TWITCH_CHANNELS')
-        if missing_vars:
-            for var in missing_vars:
-                print(f"ERROR: Missing environment variable '{var}' in .env file.")
-            sys.exit(1)  # Exit the program
+        self.check_environment_variables(token, channels)
 
+        # Initialize the bot with token, prefix, and channels
         super().__init__(
             token=token,
             prefix=prefix,
             initial_channels=[channel.strip() for channel in channels.split(',') if channel.strip()]
         )
-        self.logger = self.setup_logger()
 
-    def setup_logger(self):
-        logger = logging.getLogger('twitch_bot')
-        logger.setLevel(logging.DEBUG)  # Set to DEBUG for verbose logging
-
-        # Create handlers with utf-8 encoding
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.DEBUG)  # Capture DEBUG and above in console
-        console_formatter = logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s')
-        console_handler.setFormatter(console_formatter)
-
-        file_handler = logging.FileHandler('bot.log', encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)  # Capture DEBUG and above in log file
-        file_formatter = logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s')
-        file_handler.setFormatter(file_formatter)
-
-        # Add handlers to the logger
-        logger.addHandler(console_handler)
-        logger.addHandler(file_handler)
-
-        return logger
+    def check_environment_variables(self, token, channels):
+        """Check for missing environment variables and exit if any are missing."""
+        missing_vars = []
+        if not token:
+            missing_vars.append('TWITCH_OAUTH_TOKEN')
+        if not channels:
+            missing_vars.append('TWITCH_CHANNELS')
+        
+        if missing_vars:
+            for var in missing_vars:
+                self.logger.error(f"Missing environment variable '{var}' in .env file.")
+            sys.exit(1)  # Exit the program
 
     async def event_ready(self):
         self.logger.info(f'Logged in as | {self.nick}')
-        
-        # Fetch user data to obtain user ID
+        await self.fetch_user_id()
+        await self.load_cogs()
+
+    async def fetch_user_id(self):
+        """Fetch user data to obtain user ID."""
         try:
             users = await self.fetch_users([self.nick])
             if users:
@@ -67,56 +57,58 @@ class TwitchBot(commands.Bot):
         except Exception as e:
             self.logger.error(f"Error fetching user data: {e}", exc_info=True)
 
-        # Manually add cogs without using load_extension
-        from cogs.gpt import Gpt
-        self.add_cog(Gpt(self))
-        self.logger.info("Added cog: Gpt")
-
-        from cogs.roll import Roll
-        self.add_cog(Roll(self))
-        self.logger.info("Added cog: Roll")
-
-        from cogs.rate import Rate
-        self.add_cog(Rate(self))
-        self.logger.info("Added cog: Rate")
+    async def load_cogs(self):
+        """Load all cogs into the bot."""
+        cogs = ['Gpt', 'Roll', 'Rate', 'Create', 'Afk']
+        for cog in cogs:
+            if cog not in self.cogs:
+                module = __import__(f'cogs.{cog.lower()}', fromlist=[cog])
+                self.add_cog(module.__dict__[cog](self))
+                self.logger.info(f"Added cog: {cog}")
 
     async def event_message(self, message):
-        if message.echo:
+        """Process incoming messages and handle commands."""
+        if not message or not message.channel or not message.author:
+            self.log_missing_data(message)
             return
         
-        # Log the channel, user, and message
-        self.logger.debug(f"#{message.channel.name} - {message.author.name}: {message.content}")
+        self.logger.debug(f"Processing message from #{message.channel.name} - {message.author.name}: {message.content}")
+        
+        if message.echo:
+            self.logger.debug(f"Ignored echo message: {message.content}")
+            return
         
         await self.handle_commands(message)
 
+    def log_missing_data(self, message):
+        """Log missing data in message."""
+        self.logger.warning(
+            f"Received a message with missing data. Content: {getattr(message, 'content', 'None')}, "
+            f"Channel: {getattr(message.channel, 'name', 'None')}"
+        )
+
 
     async def event_command_error(self, context: commands.Context, error: Exception):
+        """Handle command errors."""
         if isinstance(error, commands.CommandNotFound):
-            # Optionally, notify the user or silently ignore
             self.logger.warning(f"Command not found: {context.message.content}")
             return
 
-        elif isinstance(error, commands.ArgumentParsingFailed):
+        if isinstance(error, commands.ArgumentParsingFailed):
             await context.send(f"{error.message}")
-
         elif isinstance(error, commands.MissingRequiredArgument):
             await context.send(f"@{context.author.name}, you're missing a required argument for the command.")
-
         elif isinstance(error, commands.CheckFailure):
             await context.send(f"@{context.author.name}, you don't have permission to use that command.")
-
         elif isinstance(error, commands.CommandOnCooldown):
             await context.send(f"@{context.author.name}, this command is on cooldown. Please try again in {round(error.retry_after, 2)} seconds.")
-
         else:
             self.logger.error(f"Unhandled exception: {error}", exc_info=True)
             await context.send(f"@{context.author.name}, an unexpected error occurred. Please try again later.")
 
-
 # Instantiate and run the bot
 if __name__ == '__main__':
-    # Set the console code page to UTF-8 to handle Unicode characters
-    os.system('chcp 65001 > nul')
+    os.system('chcp 65001 > nul')  # Set the console code page to UTF-8
 
     try:
         bot = TwitchBot()

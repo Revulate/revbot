@@ -18,23 +18,20 @@ class Roll(commands.Cog):
             #dice 6 2     -> rolls a 6-sided die and checks if the roll is 2 or higher
         """
         # Cap the dice size at 1000 sides for a condensed response
-        if sides > 1000:
-            description = f"d1000+"
-        else:
-            description = f"d{sides}"
+        sides = min(sides, 1000)
         
         # Perform the dice roll
         result = random.randint(1, sides)
         
         if minimum is None:
             # No minimum specified, just display the roll result
-            await ctx.send(f"@{ctx.author.name} rolled {description} and got {result}!")
+            await ctx.send(f"@{ctx.author.name} rolled d{sides} and got {result}!")
         else:
             # Roll check with minimum
             if result >= minimum:
-                await ctx.send(f"@{ctx.author.name} rolled {description} and got {result}... vs {minimum}. Success!")
+                await ctx.send(f"@{ctx.author.name} rolled d{sides} and got {result}... vs {minimum}. Success!")
             else:
-                await ctx.send(f"@{ctx.author.name} rolled {description} and got {result}... vs {minimum}. Failure!")
+                await ctx.send(f"@{ctx.author.name} rolled d{sides} and got {result}... vs {minimum}. Failure!")
 
     @commands.command(name="roll")
     async def roll_command(self, ctx: commands.Context, sides: int = 100):
@@ -45,8 +42,8 @@ class Roll(commands.Cog):
             #roll         -> rolls a 100-sided die by default
             #roll 6       -> rolls a 6-sided die
         """
-        # Ensure sides is at least 2 (can't roll a die with less than 2 sides)
-        sides = max(sides, 2)
+        # Cap the number of sides to 1000, and ensure at least 2 sides
+        sides = min(max(sides, 2), 1000)
 
         # Perform the dice roll
         result = random.randint(1, sides)
