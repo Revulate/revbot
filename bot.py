@@ -5,10 +5,10 @@ import logging
 from twitchio.ext import commands
 from dotenv import load_dotenv
 from logger import setup_logger
+import importlib
 
 # Load environment variables from .env file
 load_dotenv()
-
 
 class TwitchBot(commands.Bot):
     def __init__(self):
@@ -49,6 +49,12 @@ class TwitchBot(commands.Bot):
         await self.fetch_user_id()
         await self.load_cogs()
 
+    async def event_join(self, channel, user):
+        self.logger.info(f"{user.name} joined {channel.name}")
+
+    async def event_channel_joined(self, channel):
+        self.logger.info(f"Joined channel: {channel.name}")
+
     async def fetch_user_id(self):
         """Fetch user data to obtain user ID."""
         try:
@@ -64,12 +70,14 @@ class TwitchBot(commands.Bot):
 
     async def load_cogs(self):
         """Load all cogs into the bot."""
-        cogs = ['Gpt', 'Roll', 'Rate', 'Afk', 'React', 'Remind']  # Add other cogs as needed
+        cogs = ['Gpt', 'Roll', 'Rate', 'Afk', 'React', 'Remind',]  # Add other cogs as needed
         for cog in cogs:
             if cog not in self.cogs:
                 try:
-                    module = __import__(f'cogs.{cog.lower()}', fromlist=[cog])
-                    self.add_cog(module.__dict__[cog](self))
+                    module_name = f'cogs.{cog.lower()}'
+                    module = importlib.import_module(module_name)
+                    cog_class = getattr(module, cog)
+                    self.add_cog(cog_class(self))
                     self.logger.info(f"Added cog: {cog}")
                 except Exception as e:
                     self.logger.error(f"Failed to add cog {cog}: {e}", exc_info=True)
@@ -91,7 +99,10 @@ class TwitchBot(commands.Bot):
             self.logger.debug(f"Ignored echo message: {message.content}")
             return
 
-        await self.handle_commands(message)
+        try:
+            await self.handle_commands(message)
+        except Exception as e:
+            self.logger.error(f"Error handling message: {e}", exc_info=True)
 
     def log_missing_data(self, message):
         """Log missing data in message."""
@@ -118,10 +129,11 @@ class TwitchBot(commands.Bot):
             self.logger.error(f"Unhandled exception: {error}", exc_info=True)
             await context.send(f"@{context.author.name}, an unexpected error occurred. Please try again later.")
 
-
 # Instantiate and run the bot
 if __name__ == '__main__':
-    os.system('chcp 65001 > nul')  # Set the console code page to UTF-8
+    # Ensure the console supports UTF-8 encoding (Windows specific)
+    if os.name == 'nt':
+        os.system('chcp 65001 > nul')  # Set the console code page to UTF-8
 
     try:
         bot = TwitchBot()
