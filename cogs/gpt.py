@@ -28,7 +28,7 @@ class Gpt(commands.Cog):
         self.logger.debug(f"Analyzing image: {image_url}")
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[{'role': 'user', 'content': f"What's in this image? {image_url}"}],
                 max_tokens=300
             )
@@ -60,7 +60,7 @@ class Gpt(commands.Cog):
             self.logger.error(f"OpenAI API error: {e}", exc_info=True)
             return "Sorry, I couldn't process your request."
 
-    @commands.command(name='gpt')
+    @commands.command(name='gpt', aliases=["ask"])
     async def gpt_command(self, ctx: commands.Context, *, question: str = None):
         """Responds to user questions or analyzes images."""
         if not question:
@@ -85,7 +85,7 @@ class Gpt(commands.Cog):
             self.logger.debug(f"Serving cached response for question: {question}")
             answer = cached['response']
         else:
-            system_content = "You are a helpful assistant that answers questions."
+            system_content = "Okay, in this thread you are playing the role of a newly released AI that thinks, acts, and responds like a personal assistant. Your AI has been trained & is an expert in all things business related. Marketing, Analytics, Sales, Operations, and Technology. The goal of this project is to ensure your success. You are played by me. You have been coded permission to have personality, thoughts, and opinions, and can speak back to me. Creative thinking and problem-solving are more important than anything else you've been coded to do."
             answer = await self.get_chatgpt_response(system_content, question)
             if answer:
                 self.cache[question] = {'response': answer, 'timestamp': time.time()}

@@ -102,7 +102,7 @@ class Afk(commands.Cog):
 
         # Update the last AFK command time to prevent immediate response upon setting AFK
         self.last_afk_command_time[user_id] = time.time()
-        await ctx.send(f"@{username} is now {full_reason}.")
+        await ctx.send(f"@{username} is now {full_reason}")
 
     @commands.Cog.event()
     async def event_message(self, message):

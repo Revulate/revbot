@@ -64,9 +64,9 @@ class Create(commands.Cog):
 
     async def generate_image(self, prompt: str, n: int = 1, size: str = "1024x1024") -> list:
         """Generates image(s) based on the prompt using DALL-E."""
-        if "wide" in prompt.lower():
+        if "-wide" in prompt.lower():
             size = "1792x1024"
-        elif "tall" in prompt.lower():
+        elif "-tall" in prompt.lower():
             size = "1024x1792"
         else:
             size = "1024x1024"  # Default size

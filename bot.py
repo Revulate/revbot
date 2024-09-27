@@ -1,12 +1,14 @@
+# bot.py
 import os
 import sys
-import logging  # Ensure logging is imported
+import logging
 from twitchio.ext import commands
 from dotenv import load_dotenv
-from logger import setup_logger  # Import the logger from logger.py
+from logger import setup_logger
 
 # Load environment variables from .env file
 load_dotenv()
+
 
 class TwitchBot(commands.Bot):
     def __init__(self):
@@ -36,7 +38,7 @@ class TwitchBot(commands.Bot):
             missing_vars.append('TWITCH_OAUTH_TOKEN')
         if not channels:
             missing_vars.append('TWITCH_CHANNELS')
-        
+
         if missing_vars:
             for var in missing_vars:
                 self.logger.error(f"Missing environment variable '{var}' in .env file.")
@@ -50,7 +52,7 @@ class TwitchBot(commands.Bot):
     async def fetch_user_id(self):
         """Fetch user data to obtain user ID."""
         try:
-            users = await self.fetch_users([self.nick])
+            users = await self.fetch_users(names=[self.nick])
             if users:
                 user_id = users[0].id
                 self.bot_user_id = user_id  # Set the bot's user ID with the new attribute name
@@ -62,7 +64,7 @@ class TwitchBot(commands.Bot):
 
     async def load_cogs(self):
         """Load all cogs into the bot."""
-        cogs = ['Gpt', 'Roll', 'Rate', 'Create', 'Afk', 'React']
+        cogs = ['Gpt', 'Roll', 'Rate', 'Afk', 'React', 'Remind']  # Add other cogs as needed
         for cog in cogs:
             if cog not in self.cogs:
                 try:
@@ -77,20 +79,19 @@ class TwitchBot(commands.Bot):
         if not message or not message.channel or not message.author:
             self.log_missing_data(message)
             return
-        
+
         # Prevent the bot from responding to its own messages
         if self.bot_user_id and message.author.id == self.bot_user_id:
             self.logger.debug(f"Ignored message from bot itself: {message.content}")
             return
 
         self.logger.debug(f"Processing message from #{message.channel.name} - {message.author.name}: {message.content}")
-        
+
         if message.echo:
             self.logger.debug(f"Ignored echo message: {message.content}")
             return
-        
-        await self.handle_commands(message)
 
+        await self.handle_commands(message)
 
     def log_missing_data(self, message):
         """Log missing data in message."""
@@ -98,7 +99,6 @@ class TwitchBot(commands.Bot):
             f"Received a message with missing data. Content: {getattr(message, 'content', 'None')}, "
             f"Channel: {getattr(message.channel, 'name', 'None')}"
         )
-
 
     async def event_command_error(self, context: commands.Context, error: Exception):
         """Handle command errors."""
@@ -117,6 +117,7 @@ class TwitchBot(commands.Bot):
         else:
             self.logger.error(f"Unhandled exception: {error}", exc_info=True)
             await context.send(f"@{context.author.name}, an unexpected error occurred. Please try again later.")
+
 
 # Instantiate and run the bot
 if __name__ == '__main__':

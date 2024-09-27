@@ -1,9 +1,11 @@
+# watch.py
 import time
+
 
 class Watch:
     @staticmethod
     def format_duration(seconds):
-        """Formats the duration from seconds to days, hours, minutes, and seconds."""
+        """Formats the duration from seconds to weeks, days, hours, minutes, and seconds."""
         weeks, remainder = divmod(seconds, 604800)  # 604800 seconds in a week
         days, remainder = divmod(remainder, 86400)  # 86400 seconds in a day
         hours, remainder = divmod(remainder, 3600)  # 3600 seconds in an hour
