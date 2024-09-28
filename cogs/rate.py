@@ -1,3 +1,4 @@
+# rate.py
 import random
 import re
 from twitchio.ext import commands
@@ -101,13 +102,13 @@ class Rate(commands.Cog):
         self.logger.info(f"Sus command result: {response}")
         await ctx.send(response)
 
-    @commands.command(name="all")
+    @commands.command(name='all')
     async def all_command(self, ctx: commands.Context, *, mentioned_user: str = None):
-        """Runs all rate commands for a user and sends each result as its own message."""
+        """Runs all rate commands for the user and sends each result as a separate message."""
         user = self.get_mentioned_user(ctx, mentioned_user)
         self.logger.info(f"Running all rate commands for {user}")
 
-        # Collect all responses before sending
+        # Collect all responses
         messages = []
 
         cute = random.randint(0, 100)
@@ -142,10 +143,15 @@ class Rate(commands.Cog):
         sus_percentage = random.randint(0, 100)
         messages.append(f"{user} is {sus_percentage}% sus! {'SUSSY' if sus_percentage > 50 else 'Hmm'}")
 
-        # Split long responses and send them
-        final_message = "\n".join(messages)
-        for chunk in split_message(final_message):  # Use the imported function
-            await ctx.send(chunk)
+        # Send each message separately
+        self.logger.debug(f"Sending {len(messages)} message(s) for the #all command.")
+
+        for msg in messages:
+            try:
+                await ctx.send(msg)
+            except Exception as e:
+                self.logger.error(f"Error sending message: {e}", exc_info=True)
+                await ctx.send(f"{user}, an unexpected error occurred while sending the response.")
 
     @commands.command(name="ball")
     async def ball_command(self, ctx: commands.Context, *, mentioned_user: str = None):
@@ -173,32 +179,44 @@ class Rate(commands.Cog):
             length_str = f"{length_inches}in"
 
         # Determine variations based on the result
-        cute_response = 'MenheraCute ' if cute >= 50 else 'SadgeCry '
-        gay_response = 'Gayge' if gay_percentage > 50 else 'Gayge '
-        horny_response = 'HORNY ' if horny_percentage > 50 else 'despair '
-        sus_response = 'SUSSY ' if sus_percentage > 50 else 'Hmm '
+        cute_response = 'MenheraCute' if cute >= 50 else 'SadgeCry'
+        gay_response = 'Gayge' if gay_percentage > 50 else '📏'
+        horny_response = 'HORNY' if horny_percentage > 50 else 'despair'
+        sus_response = 'SUSSY' if sus_percentage > 50 else 'Hmm'
         iq_description = (
             "thoughtless" if iq <= 50 else
             "a slowpoke" if iq <= 80 else
             "an NPC" if iq <= 115 else
-            "a catNerd" if iq <= 199 else
-            "a BrainGalaxy"
+            "catNerd" if iq <= 199 else
+            "BrainGalaxy"
         )
-        rate_response = 'CHUG ' if rating > 5 else 'Hmm '
+        rate_response = 'CHUG' if rating > 5 else 'Hmm'
 
-        # Create a coherent summary with variations (without extra parentheses where not needed)
+        # Create a coherent summary with variations
         response = (
-            f"{user} is {cute}% cute {cute_response}, {gay_percentage}% gay {gay_response}, and {straight_percentage}% 📏. "
-            f"Their kok is {length_str} long with a {girth_inches}in girth. "
-            f"I would rate them {rating}/10 {rate_response}. Right now, they are {horny_percentage}% horny {horny_response}. "
+            f"{user} is {cute}% cute ({cute_response}), {gay_percentage}% gay ({gay_response}), "
+            f"and {straight_percentage}% straight. "
+            f"Their pp is {length_str} long with a {girth_inches}in girth. "
+            f"I would rate them {rating}/10 ({rate_response}). "
+            f"Right now, they are {horny_percentage}% horny ({horny_response}). "
             f"With an IQ of {iq}, they are {iq_description}. "
-            f"They are also {sus_percentage}% {sus_response}."
+            f"They are also {sus_percentage}% sus ({sus_response})."
         )
 
-        # Log and send the response, but split it if needed
-        final_message = response
-        for chunk in split_message(final_message):  # Use the imported function
-            await ctx.send(chunk)
+        # Adjust max_length to account for any prefixes or formatting
+        max_length = 500  # Twitch's maximum message length
+
+        # Use the split_message function to split the message appropriately
+        messages_to_send = split_message(response, max_length=max_length)
+
+        self.logger.debug(f"Sending {len(messages_to_send)} message(s) for the #ball command.")
+
+        for msg in messages_to_send:
+            try:
+                await ctx.send(msg)
+            except Exception as e:
+                self.logger.error(f"Error sending message: {e}", exc_info=True)
+                await ctx.send(f"{user}, an unexpected error occurred while sending the response.")
 
 def prepare(bot):
     bot.add_cog(Rate(bot))

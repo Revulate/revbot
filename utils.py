@@ -11,30 +11,61 @@ logger = logging.getLogger('twitch_bot.utils')
 
 def split_message(message: str, max_length: int = 500) -> list:
     """
-    Splits a message into chunks that fit within the specified max_length.
-    Ensures that words are not split and accounts for an optional prefix.
+    Splits a message into chunks of at most max_length characters,
+    trying to split at sentence boundaries.
     """
-    words = message.split()
-    chunks = []
-    current_chunk = ""
+    import re
 
-    for word in words:
-        # Check if adding the next word exceeds max_length
-        if len(current_chunk) + len(word) + 1 <= max_length:
+    # Ensure that the message is a string
+    if not isinstance(message, str):
+        message = str(message)
+
+    # List to hold the message chunks
+    messages = []
+
+    # If the message is already short enough, return it as the only element
+    if len(message) <= max_length:
+        return [message]
+
+    # Split the message into sentences using regex
+    sentences = re.findall(r'[^.!?]+[.!?]?', message)
+
+    current_chunk = ''
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        # If adding the sentence would exceed the max_length, start a new chunk
+        if len(current_chunk) + len(sentence) + 1 > max_length:
             if current_chunk:
-                current_chunk += " " + word
+                messages.append(current_chunk.strip())
+            if len(sentence) > max_length:
+                # If the sentence itself is longer than max_length, split it further
+                words = sentence.split()
+                sub_chunk = ''
+                for word in words:
+                    if len(sub_chunk) + len(word) + 1 > max_length:
+                        messages.append(sub_chunk.strip())
+                        sub_chunk = word
+                    else:
+                        sub_chunk += ' ' + word
+                if sub_chunk:
+                    messages.append(sub_chunk.strip())
+                current_chunk = ''
             else:
-                current_chunk = word
+                current_chunk = sentence
         else:
-            # Save the current chunk and start a new one
-            chunks.append(current_chunk)
-            current_chunk = word
+            if current_chunk:
+                current_chunk += ' ' + sentence
+            else:
+                current_chunk = sentence
 
-    # Append the last chunk if not empty
+    # Add any remaining text
     if current_chunk:
-        chunks.append(current_chunk)
+        messages.append(current_chunk.strip())
 
-    return chunks
+    return messages
+
 
 class CustomContext(commands.Context):
     async def send(self, content: str = None, **kwargs):
