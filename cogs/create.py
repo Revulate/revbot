@@ -9,7 +9,7 @@ from utils import split_message  # Import shared utilities
 class Create(commands.Cog):
     """Cog for handling the 'create' command for DALL-E image generation."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot):
         self.bot = bot
         self.logger = logging.getLogger('twitch_bot.cogs.create')
         openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -118,5 +118,5 @@ class Create(commands.Cog):
         else:
             await ctx.send(f"@{ctx.author.name}, I'm unable to generate the image at this time.")
 
-def setup(bot: commands.Bot):
+def prepare(bot):
     bot.add_cog(Create(bot))

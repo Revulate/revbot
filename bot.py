@@ -1,11 +1,13 @@
 # bot.py
+
 import os
 import sys
 import logging
 from twitchio.ext import commands
 from dotenv import load_dotenv
 from logger import setup_logger
-import importlib
+from utils import CustomContext  # Adjust import path if necessary
+from cogs_list import COGS  # Import the centralized cogs list
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,25 +19,39 @@ class TwitchBot(commands.Bot):
 
         # Retrieve environment variables
         token = os.getenv('TWITCH_OAUTH_TOKEN')
-        prefix = os.getenv('COMMAND_PREFIX', '#')  # Changed default prefix to '#'
+        client_id = os.getenv('CLIENT_ID')
+        nick = os.getenv('BOT_NICK')
+        prefix = os.getenv('COMMAND_PREFIX', '#')  # Default prefix is '#'
         channels = os.getenv('TWITCH_CHANNELS', '')
 
         # Check if essential environment variables are set
-        self.check_environment_variables(token, channels)
+        self.check_environment_variables(token, client_id, nick, channels)
 
-        # Initialize the bot with token, prefix, and channels
+        # Initialize the bot with token, client ID, nick, prefix, and channels
         super().__init__(
             token=token,
+            client_id=client_id,
+            nick=nick,
             prefix=prefix,
             initial_channels=[channel.strip() for channel in channels.split(',') if channel.strip()]
         )
-        self.bot_user_id = None  # Initialize the attribute with a different name to avoid conflicts
+        self.bot_user_id = None  # Initialize the attribute to store the bot's user ID
 
-    def check_environment_variables(self, token, channels):
+        # Set the custom context class
+        self.context_class = CustomContext
+
+        # Load cogs
+        self.load_cogs()
+
+    def check_environment_variables(self, token, client_id, nick, channels):
         """Check for missing environment variables and exit if any are missing."""
         missing_vars = []
         if not token:
             missing_vars.append('TWITCH_OAUTH_TOKEN')
+        if not client_id:
+            missing_vars.append('CLIENT_ID')
+        if not nick:
+            missing_vars.append('BOT_NICK')
         if not channels:
             missing_vars.append('TWITCH_CHANNELS')
 
@@ -47,10 +63,6 @@ class TwitchBot(commands.Bot):
     async def event_ready(self):
         self.logger.info(f'Logged in as | {self.nick}')
         await self.fetch_user_id()
-        await self.load_cogs()
-
-    async def event_join(self, channel, user):
-        self.logger.info(f"{user.name} joined {channel.name}")
 
     async def event_channel_joined(self, channel):
         self.logger.info(f"Joined channel: {channel.name}")
@@ -61,26 +73,21 @@ class TwitchBot(commands.Bot):
             users = await self.fetch_users(names=[self.nick])
             if users:
                 user_id = users[0].id
-                self.bot_user_id = user_id  # Set the bot's user ID with the new attribute name
+                self.bot_user_id = user_id  # Store the bot's user ID
                 self.logger.info(f'User ID is | {self.bot_user_id}')
             else:
                 self.logger.error("Failed to fetch user data.")
         except Exception as e:
             self.logger.error(f"Error fetching user data: {e}", exc_info=True)
 
-    async def load_cogs(self):
-        """Load all cogs into the bot."""
-        cogs = ['Gpt', 'Roll', 'Rate', 'Afk', 'React', 'Remind',]  # Add other cogs as needed
-        for cog in cogs:
-            if cog not in self.cogs:
-                try:
-                    module_name = f'cogs.{cog.lower()}'
-                    module = importlib.import_module(module_name)
-                    cog_class = getattr(module, cog)
-                    self.add_cog(cog_class(self))
-                    self.logger.info(f"Added cog: {cog}")
-                except Exception as e:
-                    self.logger.error(f"Failed to add cog {cog}: {e}", exc_info=True)
+    def load_cogs(self):
+        """Load all cogs as extensions."""
+        for cog in COGS:
+            try:
+                self.load_module(cog)
+                self.logger.info(f"Loaded extension: {cog}")
+            except Exception as e:
+                self.logger.error(f"Failed to load extension {cog}: {e}", exc_info=True)
 
     async def event_message(self, message):
         """Process incoming messages and handle commands."""

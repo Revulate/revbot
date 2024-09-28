@@ -1,12 +1,13 @@
 # utils.py
+
 import re
 import logging
 import sqlite3
 from datetime import datetime, timezone, timedelta
 from twitchio.ext import commands
+import asyncio
 
 logger = logging.getLogger('twitch_bot.utils')
-
 
 def split_message(message: str, max_length: int = 500) -> list:
     """
@@ -34,6 +35,28 @@ def split_message(message: str, max_length: int = 500) -> list:
         chunks.append(current_chunk)
 
     return chunks
+
+class CustomContext(commands.Context):
+    async def send(self, content: str = None, **kwargs):
+        """
+        Overrides the default send method to handle message chunking and rate limiting.
+        """
+        max_length = 500  # Twitch message length limit
+
+        if content is None:
+            return await super().send(content, **kwargs)
+
+        # Split the message into chunks
+        chunks = split_message(content, max_length=max_length)
+
+        for chunk in chunks:
+            try:
+                await super().send(chunk, **kwargs)
+                # Add delay between messages to comply with rate limits
+                await asyncio.sleep(0.5)  # Adjust delay as needed
+            except Exception as e:
+                logger.error(f"Error sending message chunk: {e}", exc_info=True)
+
 
 
 def remove_duplicate_sentences(text: str) -> str:
@@ -183,33 +206,39 @@ def parse_time(args, expect_time_keyword_at_start=True):
         return False, "Please provide a time after the keyword."
 
     # Build time_str from the arguments after the time keyword
-    # Try to find where the time expression ends and the message begins
-    for i in range(time_index + 1, len(args) + 1):
+    # Try to find the shortest possible time expression
+    for i in range(time_index + 2, len(args) + 1):
         time_str = ' '.join(args[time_index + 1:i])
+        message_text = ' '.join(args[i:]).strip()
         time_str_expanded = expand_time_units(time_str)
+        if not time_str_expanded:
+            continue  # Skip if time_str is empty
+        # Attempt to parse as a timedelta
         delta = parse_time_string(time_str_expanded)
         if delta:
             remind_time = datetime.now(timezone.utc) + delta
-            # The rest of the args from i onwards are the message
-            message_text = ' '.join(args[i:]).strip()
             if message_text:
                 return remind_time, message_text
             else:
-                return False, "Please provide a message for the reminder."
+                continue  # Try to find a longer time_str to get a message
         else:
-            # Try parsing as date
-            remind_time = parse(time_str_expanded, settings={
-                'TIMEZONE': 'UTC',
-                'RETURN_AS_TIMEZONE_AWARE': True,
-                'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': datetime.now(timezone.utc)
-            })
-            if remind_time:
-                message_text = ' '.join(args[i:]).strip()
-                if message_text:
-                    return remind_time, message_text
-                else:
-                    return False, "Please provide a message for the reminder."
+            # Avoid parsing single numbers as dates
+            if time_str_expanded.isdigit():
+                continue  # Skip parsing this time_str
+            # Only try dateparser.parse if time_str contains letters or slashes
+            if any(c.isalpha() or c in ('/', '-') for c in time_str_expanded):
+                # Try parsing as date
+                remind_time = parse(time_str_expanded, settings={
+                    'TIMEZONE': 'UTC',
+                    'RETURN_AS_TIMEZONE_AWARE': True,
+                    'PREFER_DATES_FROM': 'future',
+                    'RELATIVE_BASE': datetime.now(timezone.utc)
+                })
+                if remind_time:
+                    if message_text:
+                        return remind_time, message_text
+                    else:
+                        continue  # Try a longer time_str
     # If we get here, time parsing failed
     return False, "Could not parse the time specified."
 
@@ -247,10 +276,12 @@ def get_database_connection(db_path='reminders.db'):
     return sqlite3.connect(db_path)
 
 
+# utils.py
 def setup_database(db_path='reminders.db'):
     """Sets up the reminders database."""
     conn = get_database_connection(db_path)
     cursor = conn.cursor()
+    # Create the table with the new 'created_at' column
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS reminders (
             id TEXT PRIMARY KEY,
@@ -264,12 +295,20 @@ def setup_database(db_path='reminders.db'):
             remind_time TEXT,
             private INTEGER NOT NULL,
             trigger_on_message INTEGER NOT NULL,
-            active INTEGER NOT NULL DEFAULT 1
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
         )
     ''')
+    # Check if 'created_at' column exists; if not, add it
+    cursor.execute("PRAGMA table_info(reminders)")
+    columns = [info[1] for info in cursor.fetchall()]
+    if 'created_at' not in columns:
+        cursor.execute("ALTER TABLE reminders ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00'")
+        logger.debug("Added 'created_at' column to 'reminders' table.")
     conn.commit()
     conn.close()
     logger.debug("Reminders database setup completed.")
+
 
 
 def remove_reminder(reminder_id, db_path='reminders.db'):

@@ -6,7 +6,7 @@ class React(commands.Cog):
     
     RATE_LIMIT_SECONDS = 10  # Class-level constant for rate limiting
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot):
         self.bot = bot
         self.last_reply_time = {}  # Store the last time we replied to a user
 
@@ -59,5 +59,5 @@ class React(commands.Cog):
             await message.channel.send("!jOIn")
             self.bot.logger.debug("Automatically joined the raffle with !jOIn")
 
-def setup(bot: commands.Bot):
+def prepare(bot):
     bot.add_cog(React(bot))

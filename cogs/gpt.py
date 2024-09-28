@@ -9,7 +9,7 @@ import time
 class Gpt(commands.Cog):
     """Cog for handling the 'gpt' command, which interacts with OpenAI for Q&A and image analysis."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot):
         self.bot = bot
         self.logger = logging.getLogger('twitch_bot.cogs.gpt')
         openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -106,5 +106,5 @@ class Gpt(commands.Cog):
             self.logger.error(f"Failed to process '#gpt' command from {ctx.author.name}")
             await ctx.send(f"@{ctx.author.name}, an error occurred while processing your request.")
 
-def setup(bot: commands.Bot):
+def prepare(bot):
     bot.add_cog(Gpt(bot))

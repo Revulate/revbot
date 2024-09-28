@@ -7,7 +7,7 @@ from utils import split_message  # Import the shared split_message function
 class Rate(commands.Cog):
     """Cog for handling various rate-based commands like 'cute', 'gay', 'iq', etc.'"""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot):
         self.bot = bot
         self.logger = setup_logger('twitch_bot.cogs.rate')  # Reuse the centralized logger
 
@@ -200,5 +200,5 @@ class Rate(commands.Cog):
         for chunk in split_message(final_message):  # Use the imported function
             await ctx.send(chunk)
 
-def setup(bot: commands.Bot):
+def prepare(bot):
     bot.add_cog(Rate(bot))

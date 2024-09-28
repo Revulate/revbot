@@ -4,7 +4,7 @@ from twitchio.ext import commands
 class Roll(commands.Cog):
     """Cog for handling the 'roll' and 'dice' commands to simulate dice rolls."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot):
         self.bot = bot
 
     @commands.command(name="dice")
@@ -51,5 +51,5 @@ class Roll(commands.Cog):
         # Simple response mentioning the user
         await ctx.send(f"@{ctx.author.name} rolls {result} out of {sides}.")
 
-def setup(bot: commands.Bot):
+def prepare(bot):
     bot.add_cog(Roll(bot))
