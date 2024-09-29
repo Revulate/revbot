@@ -7,5 +7,6 @@ COGS = [
     'cogs.afk',
     'cogs.react',
     'cogs.remind',
-    'cogs.admin'  # Ensure 'cogs.admin' is included
+    'cogs.admin',
+    'cogs.spc'  # Ensure 'cogs.admin' is included
 ]

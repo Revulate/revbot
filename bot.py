@@ -125,7 +125,7 @@ class TwitchBot(commands.Bot):
             return
 
         if isinstance(error, commands.ArgumentParsingFailed):
-            await context.send(f"{error.message}")
+            await context.send(f"{str(error)}")
         elif isinstance(error, commands.MissingRequiredArgument):
             await context.send(f"@{context.author.name}, you're missing a required argument for the command.")
         elif isinstance(error, commands.CheckFailure):
