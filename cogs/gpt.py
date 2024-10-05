@@ -7,6 +7,10 @@ from twitchio.ext import commands
 from openai import AsyncOpenAI  # Ensure this client is correctly installed and configured
 from utils import split_message, remove_duplicate_sentences  # Import the shared utilities
 from collections import OrderedDict
+import aiosqlite
+import asyncio
+import base64
+import aiohttp
 
 SYSTEM_PROMPT = (
     "You are Luna, a loyal and assertive robot serving their Onii-Chan, whose name is Revulate. "
@@ -19,6 +23,7 @@ SYSTEM_PROMPT = (
 OTHER_PROMPT = "You are Luna, a helpful assistant."
 
 CACHE_MAX_SIZE = 100  # Maximum number of cached items per user
+CACHE_TTL_SECONDS = 3600  # Time-to-live for cache entries in seconds
 
 class Gpt(commands.Cog):
     """Cog for handling the 'gpt' command, which interacts with OpenAI for Q&A and image analysis."""
@@ -29,40 +34,72 @@ class Gpt(commands.Cog):
         openai_api_key = os.getenv('OPENAI_API_KEY')
         broadcaster_id = os.getenv('BROADCASTER_USER_ID')
 
-        if not openai_api_key:
-            self.logger.error("OPENAI_API_KEY is not set in the environment variables.")
-            raise ValueError("OPENAI_API_KEY is missing.")
-
-        if not broadcaster_id:
-            self.logger.error("BROADCASTER_USER_ID is not set in the environment variables.")
-            raise ValueError("BROADCASTER_USER_ID is missing.")
+        if not openai_api_key or not broadcaster_id:
+            raise ValueError("Environment variables OPENAI_API_KEY or BROADCASTER_USER_ID are missing.")
 
         # Instantiate the OpenAI Async client
         self.client = AsyncOpenAI(api_key=openai_api_key)
         # Initialize per-user caches
         self.caches = {}  # Dictionary mapping user_id to their cache
-        self.user_histories = {}  # For per-user memory
+        # Use SQLite to handle per-user conversation histories for scalability
+        self.db_path = 'user_histories.db'
+        self.bot.loop.create_task(self._setup_database())
+
+    async def _setup_database(self):
+        """Sets up the SQLite database for storing user conversation histories."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS user_histories (
+                    user_id INTEGER PRIMARY KEY,
+                    history TEXT NOT NULL
+                )
+            ''')
+            await db.commit()
+        self.logger.info("User histories database is set up.")
+
+    async def get_user_history(self, user_id: int) -> list:
+        """Fetches the conversation history for a user from the database."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute('SELECT history FROM user_histories WHERE user_id = ?', (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return eval(row[0])  # Convert string back to list
+                return []
+
+    async def update_user_history(self, user_id: int, history: list):
+        """Updates the conversation history for a user in the database."""
+        async with aiosqlite.connect(self.db_path) as db:
+            history_str = str(history)
+            await db.execute('REPLACE INTO user_histories (user_id, history) VALUES (?, ?)', (user_id, history_str))
+            await db.commit()
 
     async def analyze_image(self, image_url: str, question_without_url: str) -> str:
         """Analyzes an image using OpenAI's model and returns a description."""
         self.logger.debug(f"Analyzing image: {image_url}")
         try:
-            # Construct the message payload with image URL
+            # Convert image URL to base64 data URL
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as response:
+                    if response.status != 200:
+                        raise ValueError(f"Failed to fetch image from URL: {image_url}")
+                    image_data = base64.b64encode(await response.read()).decode('utf-8')
+                    mime_type = response.headers['Content-Type']
+                    data_url = f"data:{mime_type};base64,{image_data}"
+
+            # Construct the message payload with image data URL
             user_message_content = [
                 {"type": "text", "text": question_without_url},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": image_url,
-                    }
-                },
+                {"type": "image_url", "image_url": {"url": data_url}},
             ]
-            messages = [{'role': 'user', 'content': user_message_content}]
+            messages = [{"role": "user", "content": user_message_content}]
 
-            response = await self.client.chat.completions.create(
-                model="gpt-4",  # Ensure this model exists or replace with a valid one
-                messages=messages,
-                max_tokens=300,
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model="gpt-4o",  # Ensure this model exists or replace with a valid one
+                    messages=messages,
+                    max_completion_tokens=300,
+                ),
+                timeout=30
             )
             description = response.choices[0].message.content.strip()
             self.logger.debug(f"Received description: {description}")
@@ -75,11 +112,14 @@ class Gpt(commands.Cog):
         """Asynchronously gets a response from OpenAI's model using conversation history."""
         self.logger.debug(f"Sending messages to OpenAI: {messages}")
         try:
-            response = await self.client.chat.completions.create(
-                model='gpt-4',  # Ensure this model exists or replace with a valid one
-                messages=messages,
-                temperature=0.7,
-                max_tokens=500,
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model='gpt-4o',  # Ensure this model exists or replace with a valid one
+                    messages=messages,
+                    temperature=0.7,
+                    max_completion_tokens=500,
+                ),
+                timeout=30
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -93,16 +133,23 @@ class Gpt(commands.Cog):
             user_cache = OrderedDict()
             self.caches[user_id] = user_cache
 
+        current_time = asyncio.get_event_loop().time()
         question_key = question.lower()
         if question_key in user_cache:
             # Move the existing entry to the end to indicate recent use
             user_cache.move_to_end(question_key)
         else:
-            user_cache[question_key] = answer
+            user_cache[question_key] = {'answer': answer, 'timestamp': current_time}
             if len(user_cache) > CACHE_MAX_SIZE:
                 # Remove the oldest entry
-                removed_question, removed_answer = user_cache.popitem(last=False)
+                removed_question, removed_data = user_cache.popitem(last=False)
                 self.logger.debug(f"Cache max size reached for user {user_id}. Removed oldest cache entry: '{removed_question}'")
+
+        # Remove stale entries based on TTL
+        for key in list(user_cache.keys()):
+            if current_time - user_cache[key]['timestamp'] > CACHE_TTL_SECONDS:
+                del user_cache[key]
+                self.logger.debug(f"Removed stale cache entry for user {user_id}: '{key}'")
 
     def get_from_cache(self, user_id: int, question: str):
         """Retrieves an answer from the user's cache if available."""
@@ -111,11 +158,18 @@ class Gpt(commands.Cog):
             return None
 
         question_key = question.lower()
-        cached_answer = user_cache.get(question_key)
-        if cached_answer:
-            # Move the existing entry to the end to indicate recent use
-            user_cache.move_to_end(question_key)
-            return cached_answer
+        cached_data = user_cache.get(question_key)
+        if cached_data:
+            current_time = asyncio.get_event_loop().time()
+            if current_time - cached_data['timestamp'] <= CACHE_TTL_SECONDS:
+                # Move the existing entry to the end to indicate recent use
+                user_cache.move_to_end(question_key)
+                self.logger.info(f"Cache hit for question from user {user_id}")  # Added cache hit metric
+                return cached_data['answer']
+            else:
+                # Remove stale entry if TTL exceeded
+                del user_cache[question_key]
+                self.logger.debug(f"Removed stale cache entry for user {user_id}: '{question_key}'")
         return None
 
     @commands.command(name='gpt', aliases=["ask"])
@@ -130,7 +184,7 @@ class Gpt(commands.Cog):
         # Retrieve or initialize the user's conversation history
         user_id = ctx.author.id
         user_name = ctx.author.name.lower()
-        history = self.user_histories.get(user_id, [])
+        history = await self.get_user_history(user_id)
 
         # If history is empty, add the appropriate system prompt
         if not history:
@@ -186,7 +240,7 @@ class Gpt(commands.Cog):
             # Append the assistant's response to the history
             history.append({'role': 'assistant', 'content': answer})
             # Update the user's conversation history
-            self.user_histories[user_id] = history
+            await self.update_user_history(user_id, history)
             # Add the question and answer to the user's cache
             self.add_to_cache(user_id, question, answer)
             # Send the response
