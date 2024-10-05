@@ -11,6 +11,8 @@ import aiosqlite
 import asyncio
 import base64
 import aiohttp
+import time
+import backoff
 
 SYSTEM_PROMPT = (
     "You are Luna, a loyal and assertive robot serving their Onii-Chan, whose name is Revulate. "
@@ -35,6 +37,7 @@ class Gpt(commands.Cog):
         broadcaster_id = os.getenv('BROADCASTER_USER_ID')
 
         if not openai_api_key or not broadcaster_id:
+            self.logger.error("Environment variables OPENAI_API_KEY or BROADCASTER_USER_ID are missing.")
             raise ValueError("Environment variables OPENAI_API_KEY or BROADCASTER_USER_ID are missing.")
 
         # Instantiate the OpenAI Async client
@@ -43,6 +46,7 @@ class Gpt(commands.Cog):
         self.caches = {}  # Dictionary mapping user_id to their cache
         # Use SQLite to handle per-user conversation histories for scalability
         self.db_path = 'user_histories.db'
+        self.user_histories_cache = {}  # In-memory cache for user histories
         self.bot.loop.create_task(self._setup_database())
 
     async def _setup_database(self):
@@ -58,21 +62,28 @@ class Gpt(commands.Cog):
         self.logger.info("User histories database is set up.")
 
     async def get_user_history(self, user_id: int) -> list:
-        """Fetches the conversation history for a user from the database."""
+        """Fetches the conversation history for a user from the cache or database."""
+        if user_id in self.user_histories_cache:
+            return self.user_histories_cache[user_id]
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute('SELECT history FROM user_histories WHERE user_id = ?', (user_id,)) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    return eval(row[0])  # Convert string back to list
+                    history = eval(row[0])  # Convert string back to list
+                    self.user_histories_cache[user_id] = history
+                    return history
                 return []
 
     async def update_user_history(self, user_id: int, history: list):
-        """Updates the conversation history for a user in the database."""
-        async with aiosqlite.connect(self.db_path) as db:
-            history_str = str(history)
-            await db.execute('REPLACE INTO user_histories (user_id, history) VALUES (?, ?)', (user_id, history_str))
-            await db.commit()
+        """Updates the conversation history for a user in the database and cache."""
+        self.user_histories_cache[user_id] = history
+        if len(history) % 5 == 0:  # Update the database only every 5 messages to reduce database load
+            async with aiosqlite.connect(self.db_path) as db:
+                history_str = str(history)
+                await db.execute('REPLACE INTO user_histories (user_id, history) VALUES (?, ?)', (user_id, history_str))
+                await db.commit()
 
+    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def analyze_image(self, image_url: str, question_without_url: str) -> str:
         """Analyzes an image using OpenAI's model and returns a description."""
         self.logger.debug(f"Analyzing image: {image_url}")
@@ -108,6 +119,7 @@ class Gpt(commands.Cog):
             self.logger.error(f"Error analyzing image: {e}", exc_info=True)
             return "Sorry, I couldn't analyze the image at this time."
 
+    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def get_chatgpt_response_with_history(self, messages: list) -> str:
         """Asynchronously gets a response from OpenAI's model using conversation history."""
         self.logger.debug(f"Sending messages to OpenAI: {messages}")
@@ -133,7 +145,7 @@ class Gpt(commands.Cog):
             user_cache = OrderedDict()
             self.caches[user_id] = user_cache
 
-        current_time = asyncio.get_event_loop().time()
+        current_time = time.time()
         question_key = question.lower()
         if question_key in user_cache:
             # Move the existing entry to the end to indicate recent use
@@ -160,7 +172,7 @@ class Gpt(commands.Cog):
         question_key = question.lower()
         cached_data = user_cache.get(question_key)
         if cached_data:
-            current_time = asyncio.get_event_loop().time()
+            current_time = time.time()
             if current_time - cached_data['timestamp'] <= CACHE_TTL_SECONDS:
                 # Move the existing entry to the end to indicate recent use
                 user_cache.move_to_end(question_key)
