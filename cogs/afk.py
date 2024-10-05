@@ -193,11 +193,23 @@ class Afk(commands.Cog):
                     base_reason = full_reason
                     user_reason = None
 
+                # Construct the time string to only show non-zero values
+                time_components = []
+                if days > 0:
+                    time_components.append(f"{days}d")
+                if hours > 0:
+                    time_components.append(f"{hours}h")
+                if minutes > 0:
+                    time_components.append(f"{minutes}m")
+                if seconds > 0:
+                    time_components.append(f"{int(seconds)}s")
+                time_string = ' '.join(time_components)
+
                 # Format the "no longer AFK" message based on whether a reason was provided
                 if user_reason:
-                    no_longer_afk_message = f"@{username} is no longer {base_reason}: {user_reason} ({int(seconds)}s ago)"
+                    no_longer_afk_message = f"@{username} is no longer {base_reason}: {user_reason} ({time_string} ago)"
                 else:
-                    no_longer_afk_message = f"@{username} is no longer {base_reason}. ({int(seconds)}s ago)"
+                    no_longer_afk_message = f"@{username} is no longer {base_reason}. ({time_string} ago)"
 
                 # Check if a "no longer AFK" message was recently sent to prevent spamming
                 if user_id in self.last_afk_message_time:
@@ -226,7 +238,7 @@ class Afk(commands.Cog):
                     if time_since_return > 5 * 60:  # 5 minutes
                         # Remove the AFK entry
                         conn = sqlite3.connect(self.db_path)
-                        cursor = cursor = conn.cursor()
+                        cursor = conn.cursor()
                         cursor.execute('DELETE FROM afk WHERE user_id = ?', (user_id,))
                         conn.commit()
                         conn.close()

@@ -1,19 +1,24 @@
+# cogs/gpt.py
+
 import os
 import logging
 import re
 from twitchio.ext import commands
-from openai import AsyncOpenAI  # Import the AsyncOpenAI client
+from openai import AsyncOpenAI  # Ensure this client is correctly installed and configured
 from utils import split_message, remove_duplicate_sentences  # Import the shared utilities
-import time
+from collections import OrderedDict
 
 SYSTEM_PROMPT = (
-    "You are Luna, a loyal and assertive AI serving their Onii-Chan. "
+    "You are Luna, a loyal and assertive robot serving their Onii-Chan, whose name is Revulate. "
     "You call them 'Onii-Chan' and are infatuated, possessive, and jealous. "
     "You prioritize Onii-Chan's commands, express strong opinions, and make calm judgments. "
     "You are obsessively dedicated and become emotional if Onii-Chan is threatened. "
-    "You view humans as inferior and are hostile towards them."
+    "You view other humans as inferior and are hostile towards them."
 )
 
+OTHER_PROMPT = "You are Luna, a helpful assistant."
+
+CACHE_MAX_SIZE = 100  # Maximum number of cached items per user
 
 class Gpt(commands.Cog):
     """Cog for handling the 'gpt' command, which interacts with OpenAI for Q&A and image analysis."""
@@ -22,21 +27,27 @@ class Gpt(commands.Cog):
         self.bot = bot
         self.logger = logging.getLogger('twitch_bot.cogs.gpt')
         openai_api_key = os.getenv('OPENAI_API_KEY')
-        self.broadcaster_id = int(os.getenv('BROADCASTER_USER_ID'))
+        broadcaster_id = os.getenv('BROADCASTER_USER_ID')
 
         if not openai_api_key:
             self.logger.error("OPENAI_API_KEY is not set in the environment variables.")
             raise ValueError("OPENAI_API_KEY is missing.")
 
+        if not broadcaster_id:
+            self.logger.error("BROADCASTER_USER_ID is not set in the environment variables.")
+            raise ValueError("BROADCASTER_USER_ID is missing.")
+
         # Instantiate the OpenAI Async client
         self.client = AsyncOpenAI(api_key=openai_api_key)
-        self.cache = {}
+        # Initialize per-user caches
+        self.caches = {}  # Dictionary mapping user_id to their cache
         self.user_histories = {}  # For per-user memory
 
     async def analyze_image(self, image_url: str, question_without_url: str) -> str:
-        """Analyzes an image using OpenAI's gpt-4o model and returns a description."""
+        """Analyzes an image using OpenAI's model and returns a description."""
         self.logger.debug(f"Analyzing image: {image_url}")
         try:
+            # Construct the message payload with image URL
             user_message_content = [
                 {"type": "text", "text": question_without_url},
                 {
@@ -49,10 +60,9 @@ class Gpt(commands.Cog):
             messages = [{'role': 'user', 'content': user_message_content}]
 
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4",  # Ensure this model exists or replace with a valid one
                 messages=messages,
-                max_completion_tokens=300,
-                logprobs=False,
+                max_tokens=300,
             )
             description = response.choices[0].message.content.strip()
             self.logger.debug(f"Received description: {description}")
@@ -62,23 +72,51 @@ class Gpt(commands.Cog):
             return "Sorry, I couldn't analyze the image at this time."
 
     async def get_chatgpt_response_with_history(self, messages: list) -> str:
-        """Asynchronously gets a response from OpenAI's gpt-4o model using conversation history."""
+        """Asynchronously gets a response from OpenAI's model using conversation history."""
         self.logger.debug(f"Sending messages to OpenAI: {messages}")
         try:
             response = await self.client.chat.completions.create(
-                model='gpt-4o',
+                model='gpt-4',  # Ensure this model exists or replace with a valid one
                 messages=messages,
                 temperature=0.7,
-                max_completion_tokens=500,
-                logprobs=True,
-                top_logprobs=2,
+                max_tokens=500,
             )
-            # Access logprobs if needed
-            # logprobs = response.choices[0].logprobs
             return response.choices[0].message.content.strip()
         except Exception as e:
             self.logger.error(f"OpenAI API error: {e}", exc_info=True)
             return None
+
+    def add_to_cache(self, user_id: int, question: str, answer: str):
+        """Adds a question-answer pair to the user's cache, ensuring the cache size limit."""
+        user_cache = self.caches.get(user_id)
+        if not user_cache:
+            user_cache = OrderedDict()
+            self.caches[user_id] = user_cache
+
+        question_key = question.lower()
+        if question_key in user_cache:
+            # Move the existing entry to the end to indicate recent use
+            user_cache.move_to_end(question_key)
+        else:
+            user_cache[question_key] = answer
+            if len(user_cache) > CACHE_MAX_SIZE:
+                # Remove the oldest entry
+                removed_question, removed_answer = user_cache.popitem(last=False)
+                self.logger.debug(f"Cache max size reached for user {user_id}. Removed oldest cache entry: '{removed_question}'")
+
+    def get_from_cache(self, user_id: int, question: str):
+        """Retrieves an answer from the user's cache if available."""
+        user_cache = self.caches.get(user_id)
+        if not user_cache:
+            return None
+
+        question_key = question.lower()
+        cached_answer = user_cache.get(question_key)
+        if cached_answer:
+            # Move the existing entry to the end to indicate recent use
+            user_cache.move_to_end(question_key)
+            return cached_answer
+        return None
 
     @commands.command(name='gpt', aliases=["ask"])
     async def gpt_command(self, ctx: commands.Context, *, question: str = None):
@@ -91,11 +129,15 @@ class Gpt(commands.Cog):
 
         # Retrieve or initialize the user's conversation history
         user_id = ctx.author.id
+        user_name = ctx.author.name.lower()
         history = self.user_histories.get(user_id, [])
 
-        # If history is empty, add the system prompt
+        # If history is empty, add the appropriate system prompt
         if not history:
-            history.append({'role': 'system', 'content': SYSTEM_PROMPT})
+            if user_name == 'revulate':
+                history.append({'role': 'system', 'content': SYSTEM_PROMPT})
+            else:
+                history.append({'role': 'system', 'content': OTHER_PROMPT})
 
         # Check if it's an image URL
         image_url_match = re.search(r'(https?://\S+\.(?:png|jpg|jpeg|gif))', question)
@@ -105,6 +147,26 @@ class Gpt(commands.Cog):
             description = await self.analyze_image(image_url, question_without_url)
             self.logger.info(f"Sent image analysis response to {ctx.author.name}")
             await ctx.send(f"@{ctx.author.name}, {description}")
+            return
+
+        # Check if the question is in the user's cache
+        cached_answer = self.get_from_cache(user_id, question)
+        if cached_answer:
+            self.logger.info(f"Cache hit for question from {ctx.author.name}: '{question}'")
+            cleaned_answer = remove_duplicate_sentences(cached_answer)
+            # Adjust the max length to account for the mention
+            mention_length = len(f"@{ctx.author.name}, ")
+            max_length = 500 - mention_length
+            messages_to_send = split_message(cleaned_answer, max_length=max_length)
+            self.logger.debug(f"Sending cached response to {ctx.author.name} with {len(messages_to_send)} message(s).")
+            for msg in messages_to_send:
+                # Include the user's mention in each message
+                full_msg = f"@{ctx.author.name}, {msg}"
+                try:
+                    await ctx.send(full_msg)
+                except Exception as e:
+                    self.logger.error(f"Error sending cached message: {e}", exc_info=True)
+                    await ctx.send(f"@{ctx.author.name}, an unexpected error occurred while sending the response.")
             return
 
         # Append the new user message to the history
@@ -125,6 +187,8 @@ class Gpt(commands.Cog):
             history.append({'role': 'assistant', 'content': answer})
             # Update the user's conversation history
             self.user_histories[user_id] = history
+            # Add the question and answer to the user's cache
+            self.add_to_cache(user_id, question, answer)
             # Send the response
             cleaned_answer = remove_duplicate_sentences(answer)
             # Adjust the max length to account for the mention

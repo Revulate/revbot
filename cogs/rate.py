@@ -128,7 +128,7 @@ class Rate(commands.Cog):
             length_str = f"{feet}ft {inches}in"
         else:
             length_str = f"{length_inches}in"
-        messages.append(f"{user}'s pp is {length_str} long and has a {girth_inches}in girth. BillyApprove")
+        messages.append(f"{user} 's pp is {length_str} long and has a {girth_inches}in girth. BillyApprove")
 
         rating = random.randint(0, 10)
         messages.append(f"{user} is a {rating}/10. {'CHUG' if rating > 5 else 'Hmm'}")

@@ -5,8 +5,9 @@ COGS = [
     'cogs.roll',
     'cogs.rate',
     'cogs.afk',
-    'cogs.react',
+    # 'cogs.react',
     'cogs.remind',
     'cogs.admin',
-    'cogs.spc'  # Ensure 'cogs.admin' is included
+    'cogs.spc',
+    'cogs.dnd'  # Add this line to include the DnD cog
 ]

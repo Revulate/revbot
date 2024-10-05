@@ -79,12 +79,12 @@ class Spc(commands.Cog):
         """Fetches the list of Steam games and updates the database."""
         self.logger.info("Fetching Steam games data...")
 
-        # Make the API request to get the app list
-        # Removed 'key' from params as GetAppList typically doesn't require it
+        # Corrected API endpoint to ISteamApps/GetAppList/v2/
+        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
         params = {}
 
         try:
-            async with self.session.get("https://api.steampowered.com/IStoreService/GetAppList/v1/", params=params) as response:
+            async with self.session.get(url, params=params) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch Steam app list: {response.status}")
                     return
@@ -93,7 +93,7 @@ class Spc(commands.Cog):
             self.logger.error(f"Exception during Steam app list fetch: {e}", exc_info=True)
             return
 
-        apps = data.get('response', {}).get('apps', [])
+        apps = data.get('applist', {}).get('apps', [])
         self.logger.info(f"Fetched {len(apps)} apps from Steam.")
 
         conn = sqlite3.connect(self.db_path)
@@ -329,7 +329,7 @@ class Spc(commands.Cog):
     async def get_game_details(self, app_id: int) -> dict:
         """Retrieve the details of a Steam game by App ID."""
         params = {
-            'appids': app_id  # Changed from 'appid' to 'appids'
+            'appids': app_id  # Correct parameter name
         }
         try:
             async with self.session.get("https://store.steampowered.com/api/appdetails", params=params) as response:

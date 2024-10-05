@@ -81,7 +81,7 @@ class TwitchBot(commands.Bot):
             self.logger.error(f"Error fetching user data: {e}", exc_info=True)
 
     def load_cogs(self):
-        """Load all cogs as extensions."""
+        """Load all cogs as modules."""
         for cog in COGS:
             try:
                 self.load_module(cog)
@@ -100,11 +100,12 @@ class TwitchBot(commands.Bot):
             self.logger.debug(f"Ignored message from bot itself: {message.content}")
             return
 
-        self.logger.debug(f"Processing message from #{message.channel.name} - {message.author.name}: {message.content}")
-
+        # Check if the message is an echo (sent by the bot)
         if message.echo:
             self.logger.debug(f"Ignored echo message: {message.content}")
             return
+
+        self.logger.debug(f"Processing message from #{message.channel.name} - {message.author.name}: {message.content}")
 
         try:
             await self.handle_commands(message)
@@ -113,9 +114,11 @@ class TwitchBot(commands.Bot):
 
     def log_missing_data(self, message):
         """Log missing data in message."""
+        content = getattr(message, 'content', 'None')
+        channel = getattr(message.channel, 'name', 'None')
+        author = getattr(message.author, 'name', 'None')
         self.logger.warning(
-            f"Received a message with missing data. Content: {getattr(message, 'content', 'None')}, "
-            f"Channel: {getattr(message.channel, 'name', 'None')}"
+            f"Received a message with missing data. Content: {content}, Author: {author}, Channel: {channel}"
         )
 
     async def event_command_error(self, context: commands.Context, error: Exception):
