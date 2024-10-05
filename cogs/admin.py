@@ -5,7 +5,6 @@ import time
 import psutil
 from datetime import timedelta  # Ensure this import is present
 from twitchio.ext import commands
-from cogs_list import COGS  # Import the centralized cogs list
 from logger import setup_logger  # Import the centralized logger
 
 class Admin(commands.Cog):
@@ -35,7 +34,7 @@ class Admin(commands.Cog):
             return
         try:
             module_name = f"cogs.{cog}" if not cog.startswith("cogs.") else cog
-            self.bot.load_module(module_name)
+            await self.bot.load_extension(module_name)
             await ctx.send(f"@{ctx.author.name}, successfully loaded cog '{cog}'.")
             self.logger.info(f"Successfully loaded cog '{cog}'.")
         except Exception as e:
@@ -53,7 +52,7 @@ class Admin(commands.Cog):
             return
         try:
             module_name = f"cogs.{cog}" if not cog.startswith("cogs.") else cog
-            self.bot.unload_module(module_name)
+            await self.bot.unload_extension(module_name)
             await ctx.send(f"@{ctx.author.name}, successfully unloaded cog '{cog}'.")
             self.logger.info(f"Successfully unloaded cog '{cog}'.")
         except Exception as e:
@@ -71,7 +70,7 @@ class Admin(commands.Cog):
             return
         try:
             module_name = f"cogs.{cog}" if not cog.startswith("cogs.") else cog
-            self.bot.reload_module(module_name)
+            await self.bot.reload_extension(module_name)
             await ctx.send(f"@{ctx.author.name}, successfully reloaded cog '{cog}'.")
             self.logger.info(f"Successfully reloaded cog '{cog}'.")
         except Exception as e:
@@ -90,7 +89,7 @@ class Admin(commands.Cog):
         failed = []
         for extension in COGS:
             try:
-                self.bot.reload_module(extension)
+                await self.bot.reload_extension(extension)
                 self.logger.info(f"Successfully reloaded cog '{extension}'.")
             except Exception as e:
                 failed.append(f'{extension}: {e}')

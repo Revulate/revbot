@@ -4,67 +4,71 @@ import logging
 import asyncio
 import uuid
 from datetime import datetime, timezone
+import re
+import aiosqlite
 
 from twitchio.ext import commands
 
 from utils import (
     fetch_user, get_channel, parse_time, format_time_delta,
-    setup_database, remove_reminder, get_database_connection
+    setup_database
 )
 
 logger = logging.getLogger('twitch_bot.cogs.remind')
 
 
 class Reminder:
-    """A class representing a reminder."""
-
     def __init__(self, reminder_id, user, target, message, channel_id, channel_name,
                  remind_time=None, private=False, trigger_on_message=False, created_at=None):
         self.id = reminder_id
-        self.user = user  # User who set the reminder (User object)
-        self.target = target  # User to be reminded (User object)
+        self.user = user
+        self.target = target
         self.message = message
-        self.channel_id = channel_id  # User ID of the channel owner
+        self.channel_id = channel_id
         self.channel_name = channel_name
-        self.remind_time = remind_time  # datetime object or None
+        self.remind_time = remind_time
         self.private = private
         self.trigger_on_message = trigger_on_message
         self.active = True
-        self.created_at = created_at  # datetime object
+        self.created_at = created_at
 
 
 class Remind(commands.Cog):
-    """Cog for handling reminders."""
-
     def __init__(self, bot):
         self.bot = bot
         self.logger = logger
         self.db_path = 'reminders.db'
         self.last_channel_per_user = {}
         setup_database(self.db_path)
-        self.check_timed_reminders_task = None  # Initialize to None
+        self.check_timed_reminders_task = None
+        self.prefixes = self._get_prefixes()
+
+    def _get_prefixes(self):
+        prefix = getattr(self.bot, 'prefix', getattr(self.bot, '_prefix', '#'))
+        return prefix if isinstance(prefix, list) else [prefix]
 
     def cog_load(self):
-        if not self.check_timed_reminders_task:
+        if not self.check_timed_reminders_task or self.check_timed_reminders_task.done():
             self.check_timed_reminders_task = self.bot.loop.create_task(self.check_timed_reminders())
 
     def cog_unload(self):
         if self.check_timed_reminders_task:
             self.check_timed_reminders_task.cancel()
+            try:
+                self.bot.loop.run_until_complete(self.check_timed_reminders_task)
+            except asyncio.CancelledError:
+                pass
             self.check_timed_reminders_task = None
 
     async def check_timed_reminders(self):
-        """Background task to check and send timed reminders."""
         try:
             while True:
                 now = datetime.now(timezone.utc)
                 reminders_to_send = []
 
-                conn = get_database_connection(self.db_path)
-                cursor = conn.cursor()
-                cursor.execute('SELECT * FROM reminders WHERE remind_time IS NOT NULL AND active=1')
-                rows = cursor.fetchall()
-                conn.close()
+                async with aiosqlite.connect(self.db_path) as conn:
+                    async with conn.execute('SELECT * FROM reminders WHERE remind_time IS NOT NULL AND active=1') as cursor:
+                        rows = await cursor.fetchall()
 
                 for row in rows:
                     if len(row) != 13:
@@ -79,23 +83,20 @@ class Remind(commands.Cog):
                             remind_time = remind_time.replace(tzinfo=timezone.utc)
                     except (TypeError, ValueError) as e:
                         self.logger.error(f"Invalid datetime format for reminder {reminder_id}: {remind_time_str} Error: {e}")
-                        remove_reminder(reminder_id, self.db_path)
+                        await self.remove_reminder(reminder_id)
                         continue
 
                     if now >= remind_time:
-                        # Fetch user who set the reminder
-                        user = await fetch_user(self.bot, user_id)
+                        user = await fetch_user(self.bot, str(user_id))
                         if not user:
                             self.logger.warning(f"User '{username}' with ID '{user_id}' not found.")
-                            user = type('User', (object,), {'name': username, 'id': user_id})
+                            continue
 
-                        # Fetch target user
-                        target = await fetch_user(self.bot, target_id)
+                        target = await fetch_user(self.bot, str(target_id))
                         if not target:
                             self.logger.warning(f"Target user '{target_name}' with ID '{target_id}' not found.")
-                            target = type('User', (object,), {'name': target_name, 'id': target_id})
+                            continue
 
-                        # Get the channel
                         channel = get_channel(self.bot, channel_name)
                         if not channel:
                             self.logger.warning(f"Channel '{channel_name}' not found in bot's connected channels.")
@@ -109,37 +110,49 @@ class Remind(commands.Cog):
                         )))
 
                 for channel, reminder in reminders_to_send:
-                    await self.send_reminder(reminder, channel)
-                    remove_reminder(reminder.id, self.db_path)
+                    self.logger.debug(f"Sending reminder ID {reminder.id} to user {reminder.target.name} in channel {reminder.channel_name}.")
+                    try:
+                        await self.send_reminder(reminder, channel)
+                    except Exception as e:
+                        self.logger.error(f"Failed to send reminder ID {reminder.id} to user {reminder.target.name} in channel {reminder.channel_name}: {e}")
+                    await self.remove_reminder(reminder.id)
 
-                await asyncio.sleep(1)  # Check every second
+                await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             self.logger.info("check_timed_reminders task has been cancelled.")
 
     async def send_reminder(self, reminder: Reminder, channel):
-        """Sends the reminder message to the target user in the specified channel."""
+        time_since_set = format_time_delta(datetime.now(timezone.utc) - reminder.created_at) if reminder.created_at else "unknown"
         if reminder.user:
-            message = f"@{reminder.target.name}, reminder from @{reminder.user.name} - {reminder.message}"
+            message = f"@{reminder.target.name}, reminder from @{reminder.user.name} {time_since_set} ago - {reminder.message}"
         else:
-            message = f"@{reminder.target.name}, reminder - {reminder.message}"
+            message = f"@{reminder.target.name}, reminder {time_since_set} ago - {reminder.message}"
         if reminder.private:
             try:
-                await reminder.target.send(message)  # Sending a whisper/PM
+                await reminder.target.send(message)
                 self.logger.debug(f"Sent private reminder to {reminder.target.name}: {message}")
             except Exception as e:
                 self.logger.error(f"Failed to send private reminder to {reminder.target.name}: {e}")
         else:
-            await channel.send(message)
-            self.logger.debug(f"Sent reminder to {reminder.target.name} in {channel.name}: {message}")
+            try:
+                await channel.send(message)
+                self.logger.debug(f"Sent reminder to {reminder.target.name} in {channel.name}: {message}")
+            except Exception as e:
+                self.logger.error(f"Failed to send reminder to {reminder.target.name} in {channel.name}: {e}")
 
     @commands.Cog.event()
     async def event_message(self, message):
-        """Event handler to trigger reminders when a user sends a message."""
-        if message.echo:
-            return  # Ignore messages sent by the bot itself
+        if message.echo or not message.channel:
+            return
+
+        if hasattr(self.bot, 'bot_user_id') and message.author.id == self.bot.bot_user_id:
+            return
 
         if not message.author:
             self.log_missing_data(message)
+            return
+
+        if self.is_command(message):
             return
 
         user_id = message.author.id
@@ -149,15 +162,12 @@ class Remind(commands.Cog):
         if message_time.tzinfo is None:
             message_time = message_time.replace(tzinfo=timezone.utc)
 
-        # Update the last channel the user sent a message in
         self.last_channel_per_user[user_id] = channel
 
-        # Check if the user has any active trigger_on_message reminders
-        conn = get_database_connection(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM reminders WHERE target_id = ? AND trigger_on_message = 1 AND active = 1', (user_id,))
-        rows = cursor.fetchall()
-        conn.close()
+        async with aiosqlite.connect(self.db_path) as conn:
+            async with conn.execute('SELECT * FROM reminders WHERE target_id = ? AND trigger_on_message = 1 AND active = 1', (user_id,)) as cursor:
+                rows = await cursor.fetchall()
+        self.logger.debug(f"Fetched {len(rows)} trigger_on_message reminders for user {user_id}.")
 
         for row in rows:
             if len(row) != 13:
@@ -167,25 +177,22 @@ class Remind(commands.Cog):
              channel_name, message_text, remind_time_str, private, trigger_on_message,
              active, created_at_str) = row
 
-            # Parse 'created_at' timestamp
             try:
                 created_at = datetime.fromisoformat(created_at_str)
                 if created_at.tzinfo is None:
                     created_at = created_at.replace(tzinfo=timezone.utc)
             except (TypeError, ValueError) as e:
                 self.logger.error(f"Invalid 'created_at' format for reminder {reminder_id}: {created_at_str} Error: {e}")
-                remove_reminder(reminder_id, self.db_path)
+                await self.remove_reminder(reminder_id)
                 continue
 
-            # Only trigger the reminder if the message was sent after the reminder was created
-            if message_time <= created_at:
-                continue  # Do not trigger the reminder
+            if message_time < created_at:
+                continue
 
-            # Fetch user who set the reminder
-            user = await fetch_user(self.bot, user_id_db)
+            user = await fetch_user(self.bot, str(user_id_db))
             if not user:
                 self.logger.warning(f"User '{username}' with ID '{user_id_db}' not found.")
-                user = type('User', (object,), {'name': username, 'id': user_id_db})
+                continue
 
             reminder = Reminder(
                 reminder_id, user, message.author, message_text,
@@ -193,344 +200,64 @@ class Remind(commands.Cog):
                 remind_time=None, private=bool(private), trigger_on_message=bool(trigger_on_message),
                 created_at=created_at
             )
-            await self.send_reminder(reminder, channel)
-            remove_reminder(reminder.id, self.db_path)
-
-    async def store_reminder(self, reminder):
-        """Stores the reminder in the database."""
-        conn = get_database_connection(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO reminders (id, user_id, username, target_id, target_name, channel_id, channel_name,
-            message, remind_time, private, trigger_on_message, active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            reminder.id,
-            reminder.user.id,
-            reminder.user.name,
-            reminder.target.id,
-            reminder.target.name,
-            reminder.channel_id,
-            reminder.channel_name,
-            reminder.message,
-            reminder.remind_time.isoformat() if reminder.remind_time else None,
-            int(reminder.private),
-            int(reminder.trigger_on_message),
-            int(reminder.active),
-            reminder.created_at.isoformat() if reminder.created_at else datetime.now(timezone.utc).isoformat()
-        ))
-        conn.commit()
-        conn.close()
-        self.logger.debug(f"Stored reminder {reminder.id}: {reminder.__dict__}")
+            try:
+                await self.send_reminder(reminder, channel)
+            except Exception as e:
+                self.logger.error(f"Failed to send reminder ID {reminder.id} to user {reminder.target.name} in channel {reminder.channel_name}: {e}")
+            await self.remove_reminder(reminder.id)
 
     @commands.command(name='remind')
-    async def remind(self, ctx: commands.Context, target_identifier: str = None, *args):
-        """
-        Sets a reminder for another user.
-
-        Usage:
-        - #remind (person) [in/on/after time] message
-        """
-        self.logger.info(f"Processing command 'remind' from {ctx.author.name}: Target={target_identifier}, Args={args}")
-
-        if not target_identifier:
-            await ctx.send(f"@{ctx.author.name}, please provide a target for the reminder.")
-            return
-
-        # Fetch the target user
+    async def remind_command(self, ctx: commands.Context, target_identifier: str, *, message: str):
         target = await fetch_user(self.bot, target_identifier)
         if not target:
             await ctx.send(f"@{ctx.author.name}, user '{target_identifier}' not found.")
             return
 
-        if not args:
-            await ctx.send(f"@{ctx.author.name}, please provide a message for the reminder.")
-            return
-
-        # Parse time and message
-        remind_time, message_text = parse_time(args, expect_time_keyword_at_start=True)
-        if remind_time is False:
-            await ctx.send(f"@{ctx.author.name}, {message_text}")
-            return
-
-        # Validate message text
-        if not message_text:
-            await ctx.send(f"@{ctx.author.name}, please provide a message for the reminder.")
-            return
-
-        # Create a unique reminder ID
         reminder_id = str(uuid.uuid4())[:8]
+        channel_name = ctx.channel.name
+        channel_id = ctx.channel.name
+        created_at = ctx.message.timestamp or datetime.now(timezone.utc)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
 
-        # Get the channel where the command was used
-        channel = ctx.channel
-        channel_name = channel.name
-
-        # Fetch channel user ID
-        channel_user = await fetch_user(self.bot, channel_name)
-        if not channel_user:
-            await ctx.send(f"@{ctx.author.name}, failed to fetch channel information.")
-            return
-        channel_id = channel_user.id
-
-        # Determine if it's a trigger_on_message reminder
-        trigger_on_message = remind_time is None
-
-        # Create the Reminder object
         reminder = Reminder(
             reminder_id=reminder_id,
             user=ctx.author,
             target=target,
-            message=message_text,
+            message=message,
             channel_id=channel_id,
             channel_name=channel_name,
-            remind_time=remind_time,
-            private=False,
-            trigger_on_message=trigger_on_message,
-            created_at=ctx.message.timestamp or datetime.now(timezone.utc)
+            created_at=created_at,
+            trigger_on_message=True  # Ensure trigger_on_message is set to True for the command to work
         )
-        if reminder.created_at.tzinfo is None:
-            reminder.created_at = reminder.created_at.replace(tzinfo=timezone.utc)
 
-        # Store the reminder
-        await self.store_reminder(reminder)
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                '''INSERT INTO reminders (id, user_id, username, target_id, target_name, channel_id, channel_name,
+                message, remind_time, private, trigger_on_message, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (reminder.id, reminder.user.id, reminder.user.name, reminder.target.id, reminder.target.name, reminder.channel_id,
+                 reminder.channel_name, reminder.message, None, int(reminder.private), int(reminder.trigger_on_message), int(reminder.active), reminder.created_at.isoformat())
+            )
+            await conn.commit()
 
-        # Confirm to the user
-        if remind_time:
-            time_formatted = format_time_delta(remind_time - datetime.now(timezone.utc))
-            await ctx.send(f"@{ctx.author.name}, I will remind @{target.name} in {time_formatted} - {message_text}. ID: {reminder.id}")
-        else:
-            await ctx.send(f"@{ctx.author.name}, I will remind @{target.name} on their next message - {message_text}. ID: {reminder.id}")
+        await ctx.send(f"@{ctx.author.name}, reminder set for @{target.name}: {message}. ID: {reminder.id}")
 
-    @commands.command(name='remindme')
-    async def remindme(self, ctx: commands.Context, *args):
-        """
-        Sets a reminder for yourself.
-
-        Usage:
-        - #remindme [in/on/after time] message
-        """
-        self.logger.info(f"Processing command 'remindme' from {ctx.author.name}: Args={args}")
-
-        if not args:
-            await ctx.send(f"@{ctx.author.name}, please provide a message for the reminder.")
-            return
-
-        # Parse time and message
-        remind_time, message_text = parse_time(args, expect_time_keyword_at_start=True)
-        if remind_time is False:
-            await ctx.send(f"@{ctx.author.name}, {message_text}")
-            return
-
-        # Validate message text
-        if not message_text:
-            await ctx.send(f"@{ctx.author.name}, please provide a message for the reminder.")
-            return
-
-        # Create a unique reminder ID
-        reminder_id = str(uuid.uuid4())[:8]
-
-        # Get the channel where the command was used
-        channel = ctx.channel
-        channel_name = channel.name
-
-        # Fetch channel user ID
-        channel_user = await fetch_user(self.bot, channel_name)
-        if not channel_user:
-            await ctx.send(f"@{ctx.author.name}, failed to fetch channel information.")
-            return
-        channel_id = channel_user.id
-
-        # Determine if it's a trigger_on_message reminder
-        trigger_on_message = remind_time is None
-
-        # Create the Reminder object
-        reminder = Reminder(
-            reminder_id=reminder_id,
-            user=ctx.author,
-            target=ctx.author,
-            message=message_text,
-            channel_id=channel_id,
-            channel_name=channel_name,
-            remind_time=remind_time,
-            private=False,
-            trigger_on_message=trigger_on_message,
-            created_at=ctx.message.timestamp or datetime.now(timezone.utc)
-        )
-        if reminder.created_at.tzinfo is None:
-            reminder.created_at = reminder.created_at.replace(tzinfo=timezone.utc)
-
-        # Store the reminder
-        await self.store_reminder(reminder)
-
-        # Confirm to the user
-        if remind_time:
-            time_formatted = format_time_delta(remind_time - datetime.now(timezone.utc))
-            await ctx.send(f"@{ctx.author.name}, I will remind you in {time_formatted} - {message_text}. ID: {reminder.id}")
-        else:
-            await ctx.send(f"@{ctx.author.name}, I will remind you on your next message - {message_text}. ID: {reminder.id}")
-
-    @commands.command(name='unset')
-    async def unset(self, ctx: commands.Context, *, arg: str = None):
-        """
-        Unsets a reminder by ID or 'last'.
-
-        Usage:
-        - #unset reminder (ID)
-        - #unset reminder last
-        """
-        if not arg:
-            await ctx.send(f"@{ctx.author.name}, please provide the ID of the reminder to unset.")
-            return
-
-        parts = arg.split()
-        if len(parts) != 2 or parts[0].lower() != 'reminder':
-            await ctx.send(f"@{ctx.author.name}, please use the format: #unset reminder (ID)")
-            return
-
-        identifier = parts[1].lower()
-        reminder = None
-
-        conn = get_database_connection(self.db_path)
-        cursor = conn.cursor()
-        if identifier == 'last':
-            # Find the last reminder set by the user or for the user
-            cursor.execute('''
-                SELECT * FROM reminders
-                WHERE (user_id = ? OR target_id = ?) AND active = 1
-                ORDER BY rowid DESC
-                LIMIT 1
-            ''', (ctx.author.id, ctx.author.id))
-        else:
-            # Find by ID
-            cursor.execute('SELECT * FROM reminders WHERE id = ? AND active = 1', (identifier,))
-
-        row = cursor.fetchone()
-        conn.close()
-
-        if row:
-            if len(row) != 13:
-                self.logger.error(f"Unexpected number of columns in row: {row}")
-                await ctx.send(f"@{ctx.author.name}, failed to unset the reminder due to an error.")
-                return
-            (reminder_id, user_id_db, username, target_id, target_name, channel_id,
-             channel_name, message_text, remind_time_str, private, trigger_on_message,
-             active, created_at_str) = row
-
-            # Ensure the user has permission to unset the reminder
-            if str(user_id_db) != str(ctx.author.id) and str(target_id) != str(ctx.author.id):
-                await ctx.send(f"@{ctx.author.name}, you can only unset your own reminders or reminders set for you.")
-                return
-
-            # Remove the reminder from the database
-            remove_reminder(reminder_id, self.db_path)
-
-            # Send confirmation in the appropriate channel
-            channel = get_channel(self.bot, channel_name)
-            if channel:
-                await channel.send(f"@{ctx.author.name}, reminder '{reminder_id}' has been unset.")
-            else:
-                await ctx.send(f"@{ctx.author.name}, reminder '{reminder_id}' has been unset.")
-        else:
-            await ctx.send(f"@{ctx.author.name}, no reminder found with ID '{identifier}'.")
-
-    @commands.command(name='listreminders')
-    async def listreminders(self, ctx: commands.Context):
-        """
-        Lists all active reminders for the user.
-
-        Usage:
-        - #listreminders
-        """
-        conn = get_database_connection(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, message, remind_time, trigger_on_message FROM reminders
-            WHERE (user_id = ? OR target_id = ?) AND active = 1
-            ORDER BY remind_time ASC
-        ''', (ctx.author.id, ctx.author.id))
-        rows = cursor.fetchall()
-        conn.close()
-
-        if rows:
-            reminders = []
-            for row in rows:
-                reminder_id, message_text, remind_time_str, trigger_on_message = row
-                if remind_time_str:
-                    try:
-                        remind_time = datetime.fromisoformat(remind_time_str)
-                        if remind_time.tzinfo is None:
-                            remind_time = remind_time.replace(tzinfo=timezone.utc)
-                        time_remaining = remind_time - datetime.now(timezone.utc)
-                        time_formatted = format_time_delta(time_remaining)
-                    except (TypeError, ValueError):
-                        time_formatted = 'Unknown time'
-                elif trigger_on_message:
-                    time_formatted = 'On next message'
-                else:
-                    time_formatted = 'Unknown time'
-                reminders.append(f"ID: {reminder_id}, In: {time_formatted}, Message: {message_text}")
-            reminders_text = ' | '.join(reminders)
-            await ctx.send(f"@{ctx.author.name}, your active reminders: {reminders_text}")
-        else:
-            await ctx.send(f"@{ctx.author.name}, you have no active reminders.")
-
-    @commands.command(name='editreminder')
-    async def editreminder(self, ctx: commands.Context, reminder_id: str, *, new_message: str = None):
-        """
-        Modifies an existing reminder.
-
-        Usage:
-        - #editreminder (ID) new message
-        """
-        if not reminder_id or not new_message:
-            await ctx.send(f"@{ctx.author.name}, please provide the ID of the reminder and the new message.")
-            return
-
-        conn = get_database_connection(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM reminders WHERE id = ? AND active = 1', (reminder_id,))
-        row = cursor.fetchone()
-
-        if row:
-            if len(row) != 13:
-                self.logger.error(f"Unexpected number of columns in row: {row}")
-                await ctx.send(f"@{ctx.author.name}, failed to edit the reminder due to an error.")
-                conn.close()
-                return
-            (reminder_id_db, user_id_db, username, target_id, target_name, channel_id,
-             channel_name, message_text, remind_time_str, private, trigger_on_message,
-             active, created_at_str) = row
-
-            # Ensure the user has permission to modify the reminder
-            if str(user_id_db) != str(ctx.author.id):
-                await ctx.send(f"@{ctx.author.name}, you can only edit your own reminders.")
-                conn.close()
-                return
-
-            # Update the reminder message
-            cursor.execute('UPDATE reminders SET message = ? WHERE id = ?', (new_message, reminder_id))
-            conn.commit()
-            conn.close()
-            await ctx.send(f"@{ctx.author.name}, reminder '{reminder_id}' has been updated.")
-        else:
-            conn.close()
-            await ctx.send(f"@{ctx.author.name}, no active reminder found with ID '{reminder_id}'.")
-
-    def cog_load(self):
-        if not self.check_timed_reminders_task:
-            self.check_timed_reminders_task = self.bot.loop.create_task(self.check_timed_reminders())
-
-    def cog_unload(self):
-        if self.check_timed_reminders_task:
-            self.check_timed_reminders_task.cancel()
-            self.check_timed_reminders_task = None
+    def is_command(self, message):
+        message_content = message.content.strip()
+        pattern = f"^({'|'.join(re.escape(prefix) for prefix in self.prefixes)})(\w+)"
+        match = re.match(pattern, message_content)
+        return bool(match)
 
     def log_missing_data(self, message):
-        """Logs messages with missing data."""
         self.logger.warning(
             f"Received a message with missing data. Content: {getattr(message, 'content', 'None')}, "
             f"Channel: {getattr(message.channel, 'name', 'None')}"
         )
+
+    async def remove_reminder(self, reminder_id: str):
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute('DELETE FROM reminders WHERE id = ?', (reminder_id,))
+            await conn.commit()
 
 def prepare(bot):
     bot.add_cog(Remind(bot))
