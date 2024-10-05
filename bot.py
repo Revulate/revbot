@@ -3,11 +3,27 @@
 import os
 import sys
 import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from twitchio.ext import commands
 from dotenv import load_dotenv
 from logger import setup_logger
 from utils import CustomContext  # Adjust import path if necessary
-from cogs_list import COGS  # Import the centralized cogs list
+import configparser
+import random
+
+# List of cogs
+COGS = [
+    'cogs.gpt',
+    'cogs.roll',
+    'cogs.rate',
+    'cogs.afk',
+    # 'cogs.react',
+    'cogs.remind',
+    'cogs.admin',
+    'cogs.spc',
+    'cogs.dnd'  # Add this line to include the DnD cog
+]
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,15 +33,13 @@ class TwitchBot(commands.Bot):
         # Set up the logger
         self.logger = setup_logger()
 
-        # Retrieve environment variables
-        token = os.getenv('TWITCH_OAUTH_TOKEN')
-        client_id = os.getenv('CLIENT_ID')
-        nick = os.getenv('BOT_NICK')
-        prefix = os.getenv('COMMAND_PREFIX', '#')  # Default prefix is '#'
-        channels = os.getenv('TWITCH_CHANNELS', '')
-
-        # Check if essential environment variables are set
-        self.check_environment_variables(token, client_id, nick, channels)
+        # Load configuration
+        config = self.load_config()
+        token = config.get('Twitch', 'TWITCH_OAUTH_TOKEN')
+        client_id = config.get('Twitch', 'CLIENT_ID')
+        nick = config.get('Twitch', 'BOT_NICK')
+        prefix = config.get('Twitch', 'COMMAND_PREFIX', fallback='#')  # Default prefix is '#'
+        channels = config.get('Twitch', 'TWITCH_CHANNELS', fallback='')
 
         # Initialize the bot with token, client ID, nick, prefix, and channels
         super().__init__(
@@ -41,24 +55,22 @@ class TwitchBot(commands.Bot):
         self.context_class = CustomContext
 
         # Load cogs
-        self.load_cogs()
+        self.loop.run_until_complete(self.load_cogs())
 
-    def check_environment_variables(self, token, client_id, nick, channels):
-        """Check for missing environment variables and exit if any are missing."""
-        missing_vars = []
-        if not token:
-            missing_vars.append('TWITCH_OAUTH_TOKEN')
-        if not client_id:
-            missing_vars.append('CLIENT_ID')
-        if not nick:
-            missing_vars.append('BOT_NICK')
-        if not channels:
-            missing_vars.append('TWITCH_CHANNELS')
+    def load_config(self):
+        """Load configuration from a centralized configuration file."""
+        config = configparser.ConfigParser()
+        config.read('config.ini')
 
-        if missing_vars:
-            for var in missing_vars:
-                self.logger.error(f"Missing environment variable '{var}' in .env file.")
-            sys.exit(1)  # Exit the program
+        # Check for missing sections or options
+        if 'Twitch' not in config:
+            raise EnvironmentError("Missing 'Twitch' section in config.ini file.")
+        required_keys = ['TWITCH_OAUTH_TOKEN', 'CLIENT_ID', 'BOT_NICK']
+        missing_keys = [key for key in required_keys if key not in config['Twitch']]
+        if missing_keys:
+            raise EnvironmentError(f"Missing required keys in 'Twitch' section of config.ini: {', '.join(missing_keys)}")
+
+        return config
 
     async def event_ready(self):
         self.logger.info(f'Logged in as | {self.nick}')
@@ -68,49 +80,85 @@ class TwitchBot(commands.Bot):
         self.logger.info(f"Joined channel: {channel.name}")
 
     async def fetch_user_id(self):
-        """Fetch user data to obtain user ID."""
-        try:
-            users = await self.fetch_users(names=[self.nick])
-            if users:
-                user_id = users[0].id
-                self.bot_user_id = user_id  # Store the bot's user ID
-                self.logger.info(f'User ID is | {self.bot_user_id}')
-            else:
-                self.logger.error("Failed to fetch user data.")
-        except Exception as e:
-            self.logger.error(f"Error fetching user data: {e}", exc_info=True)
+        """Fetch user data to obtain user ID with retry mechanism for transient failures using exponential backoff."""
+        retries = 3
+        base_delay = 5  # Initial delay in seconds
+        for attempt in range(1, retries + 1):
+            try:
+                users = await self.fetch_users(names=[self.nick])
+                if users:
+                    user_id = users[0].id
+                    self.bot_user_id = user_id  # Store the bot's user ID
+                    self.logger.info(f'User ID is | {self.bot_user_id}')
+                    return
+                else:
+                    self.logger.error("Failed to fetch user data.")
+            except Exception as e:
+                self.logger.error(f"Attempt {attempt} - Error fetching user data: {e}", exc_info=True)
 
-    def load_cogs(self):
+            if attempt < retries:
+                delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)  # Exponential backoff with jitter
+                self.logger.info(f"Retrying to fetch user data in {delay:.2f} seconds...")
+                await asyncio.sleep(delay)
+
+        self.logger.error("Exceeded maximum retries to fetch user data.")
+
+    async def load_cogs(self):
         """Load all cogs as modules."""
+        loop = asyncio.get_event_loop()
         for cog in COGS:
             try:
-                self.load_module(cog)
-                self.logger.info(f"Loaded extension: {cog}")
+                await loop.run_in_executor(None, self.load_module, cog)
+                cog_name = cog.split('.')[-1].capitalize()
+                self.logger.info(f"Loaded extension: {cog_name}")
             except Exception as e:
                 self.logger.error(f"Failed to load extension {cog}: {e}", exc_info=True)
 
     async def event_message(self, message):
         """Process incoming messages and handle commands."""
-        if not message or not message.channel or not message.author:
-            self.log_missing_data(message)
+        if not self._validate_message(message):
             return
 
-        # Prevent the bot from responding to its own messages
-        if self.bot_user_id and message.author.id == self.bot_user_id:
-            self.logger.debug(f"Ignored message from bot itself: {message.content}")
+        if self._is_bot_message(message):
             return
 
-        # Check if the message is an echo (sent by the bot)
-        if message.echo:
-            self.logger.debug(f"Ignored echo message: {message.content}")
-            return
-
-        self.logger.debug(f"Processing message from #{message.channel.name} - {message.author.name}: {message.content}")
+        self._log_message_processing(message)
 
         try:
             await self.handle_commands(message)
+        except commands.CommandNotFound as e:
+            self.logger.warning(f"Command not found: {message.content}")
+        except commands.ArgumentParsingFailed as e:
+            self.logger.error(f"Argument parsing failed: {message.content}", exc_info=True)
+        except commands.MissingRequiredArgument as e:
+            self.logger.error(f"Missing required argument: {message.content}", exc_info=True)
+        except commands.CheckFailure as e:
+            self.logger.error(f"Check failed for command: {message.content}", exc_info=True)
+        except commands.CommandOnCooldown as e:
+            self.logger.warning(f"Command on cooldown: {message.content}")
         except Exception as e:
             self.logger.error(f"Error handling message: {e}", exc_info=True)
+
+    def _validate_message(self, message):
+        """Validate the incoming message to ensure it has necessary attributes."""
+        if not message or not message.channel or not message.author:
+            self.log_missing_data(message)
+            return False
+        return True
+
+    def _is_bot_message(self, message):
+        """Check if the message is from the bot itself or an echo message."""
+        if self.bot_user_id and message.author.id == self.bot_user_id:
+            self.logger.debug(f"Ignored message from bot itself: {message.content}")
+            return True
+        if message.echo:
+            self.logger.debug(f"Ignored echo message: {message.content}")
+            return True
+        return False
+
+    def _log_message_processing(self, message):
+        """Log details about the message being processed."""
+        self.logger.debug(f"Processing message from #{message.channel.name} - {message.author.name}: {message.content}")
 
     def log_missing_data(self, message):
         """Log missing data in message."""
@@ -128,12 +176,16 @@ class TwitchBot(commands.Bot):
             return
 
         if isinstance(error, commands.ArgumentParsingFailed):
+            self.logger.error(f"Argument parsing failed: {context.message.content}", exc_info=True)
             await context.send(f"{str(error)}")
         elif isinstance(error, commands.MissingRequiredArgument):
+            self.logger.error(f"Missing required argument: {context.message.content}", exc_info=True)
             await context.send(f"@{context.author.name}, you're missing a required argument for the command.")
         elif isinstance(error, commands.CheckFailure):
+            self.logger.error(f"Check failed for command: {context.message.content}", exc_info=True)
             await context.send(f"@{context.author.name}, you don't have permission to use that command.")
         elif isinstance(error, commands.CommandOnCooldown):
+            self.logger.warning(f"Command on cooldown: {context.message.content}")
             await context.send(f"@{context.author.name}, this command is on cooldown. Please try again in {round(error.retry_after, 2)} seconds.")
         else:
             self.logger.error(f"Unhandled exception: {error}", exc_info=True)

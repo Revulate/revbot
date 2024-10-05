@@ -3,8 +3,8 @@
 import os
 import asyncio
 import logging
+import aiosqlite
 import aiohttp
-import sqlite3
 from datetime import datetime, timedelta
 from twitchio.ext import commands
 from rapidfuzz import process, fuzz  # For fuzzy search
@@ -17,7 +17,7 @@ class Spc(commands.Cog):
         self.logger = logging.getLogger('twitch_bot.cogs.spc')
         self.logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
-        formatter = logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s')
+        formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         if not self.logger.handlers:
             self.logger.addHandler(handler)
@@ -27,7 +27,7 @@ class Spc(commands.Cog):
             self.logger.warning("API_STEAM_KEY environment variable not set. Some features may be limited.")
 
         self.db_path = 'steam_game.db'
-        self._setup_database()
+        self.bot.loop.create_task(self._setup_database())
 
         # Initialize the HTTP session asynchronously
         self.session = None
@@ -49,19 +49,20 @@ class Spc(commands.Cog):
             self.logger.info("Closed aiohttp ClientSession.")
         self.logger.info("Spc cog unloaded and fetch task canceled.")
 
-    def _setup_database(self):
+    async def _setup_database(self):
         """Set up the Steam_Game table in the SQLite database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS Steam_Game (
-                ID INTEGER PRIMARY KEY,
-                Name TEXT NOT NULL
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        self.logger.info("Steam_Game table is set up.")
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute('''
+                    CREATE TABLE IF NOT EXISTS Steam_Game (
+                        ID INTEGER PRIMARY KEY,
+                        Name TEXT NOT NULL
+                    )
+                ''')
+                await db.commit()
+            self.logger.info("Steam_Game table is set up.")
+        except Exception as e:
+            self.logger.error(f"Error setting up the database: {e}", exc_info=True)
 
     async def fetch_games_data_periodically(self):
         """Periodically fetches Steam games data every hour."""
@@ -84,7 +85,7 @@ class Spc(commands.Cog):
         params = {}
 
         try:
-            async with self.session.get(url, params=params) as response:
+            async with self.session.get(url, params=params, timeout=10) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch Steam app list: {response.status}")
                     return
@@ -96,28 +97,27 @@ class Spc(commands.Cog):
         apps = data.get('applist', {}).get('apps', [])
         self.logger.info(f"Fetched {len(apps)} apps from Steam.")
 
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                for game in apps:
+                    app_id = game.get('appid')
+                    name = game.get('name')
 
-        for game in apps:
-            app_id = game.get('appid')
-            name = game.get('name')
+                    if not app_id or not name:
+                        continue
 
-            if not app_id or not name:
-                continue
+                    try:
+                        async with db.execute('SELECT 1 FROM Steam_Game WHERE ID = ?', (app_id,)) as cursor:
+                            if await cursor.fetchone():
+                                continue  # Game already exists
 
-            try:
-                cursor.execute('SELECT 1 FROM Steam_Game WHERE ID = ?', (app_id,))
-                if cursor.fetchone():
-                    continue  # Game already exists
-
-                cursor.execute('INSERT INTO Steam_Game (ID, Name) VALUES (?, ?)', (app_id, name))
-            except Exception as e:
-                self.logger.error(f"Error inserting game ID {app_id}: {e}", exc_info=True)
-
-        conn.commit()
-        conn.close()
-        self.logger.info("Steam games data updated successfully.")
+                        await db.execute('INSERT INTO Steam_Game (ID, Name) VALUES (?, ?)', (app_id, name))
+                    except Exception as e:
+                        self.logger.error(f"Error inserting game ID {app_id}: {e}", exc_info=True)
+                await db.commit()
+            self.logger.info("Steam games data updated successfully.")
+        except Exception as e:
+            self.logger.error(f"Error updating the database: {e}", exc_info=True)
 
     @commands.command(name='spc', aliases=['sgp'])
     async def steam_game_players(self, ctx: commands.Context, *args):
@@ -138,59 +138,8 @@ class Spc(commands.Cog):
             return
 
         # Initialize variables
-        gameID = None
-        skipReviews = False
-        gameName = None
-        channel_name = None
-
-        # Parse arguments
-        if not args:
-            await ctx.send(f"@{ctx.author.name}, please provide a game ID or name.")
-            return
-
-        first_arg = args[0]
-
-        if first_arg.startswith('#'):
-            # Channel specification
-            channel_name = first_arg[1:].lower()
-            args = args[1:]  # Remove channel from args
-
-            if not args:
-                await ctx.send(f"@{ctx.author.name}, please provide a game ID or name after the channel.")
-                return
-
-            first_arg = args[0]
-
-        if first_arg.isdigit():
-            # First argument is gameID
-            gameID = int(first_arg)
-            args = args[1:]
-
-            if args:
-                second_arg = args[0].lower()
-                if second_arg in ['true', '1', 'yes']:
-                    skipReviews = True
-                    args = args[1:]
-                # Remaining args are gameName
-                if args:
-                    gameName = ' '.join(args)
-        else:
-            # First argument is gameName
-            gameName = ' '.join(args)
-
-        # If gameName starts with '#', treat it as channel_name
-        if gameName and gameName.startswith('#'):
-            parts = gameName.split(' ', 1)
-            channel_name = parts[0][1:].lower()
-            gameName = parts[1] if len(parts) > 1 else None
-
-        # Validate input
-        if gameID and gameName:
-            await ctx.send(f"@{ctx.author.name}, please provide either a game ID or a game name, not both.")
-            return
-
-        if not gameID and not gameName:
-            await ctx.send(f"@{ctx.author.name}, please provide a game ID or name.")
+        gameID, skipReviews, gameName, channel_name = await self.parse_arguments(args, ctx)
+        if gameID is None and gameName is None:
             return
 
         # Fetch gameID if not provided
@@ -223,7 +172,64 @@ class Spc(commands.Cog):
         if reviews_string:
             reply += f" {reviews_string}"
 
-        # If channel is specified and bot is connected, send to that channel
+        await self.send_message(ctx, channel_name, reply)
+
+    async def parse_arguments(self, args, ctx):
+        """Parse arguments provided to the spc command."""
+        if not args:
+            await ctx.send(f"@{ctx.author.name}, please provide a game ID or name.")
+            return None, None, None, None
+
+        gameID = None
+        skipReviews = False
+        gameName = None
+        channel_name = None
+
+        first_arg = args[0]
+
+        if first_arg.startswith('#'):
+            # Channel specification
+            channel_name = first_arg[1:].lower()
+            args = args[1:]  # Remove channel from args
+
+            if not args:
+                await ctx.send(f"@{ctx.author.name}, please provide a game ID or name after the channel.")
+                return None, None, None, None
+
+            first_arg = args[0]
+
+        if first_arg.isdigit():
+            # First argument is gameID
+            gameID = int(first_arg)
+            args = args[1:]
+
+            if args:
+                second_arg = args[0].lower()
+                if second_arg in ['true', '1', 'yes']:
+                    skipReviews = True
+                    args = args[1:]
+                # Remaining args are gameName
+                if args:
+                    gameName = ' '.join(args)
+        else:
+            # First argument is gameName
+            gameName = ' '.join(args)
+
+        # If gameName starts with '#', treat it as channel_name
+        if gameName and gameName.startswith('#'):
+            parts = gameName.split(' ', 1)
+            channel_name = parts[0][1:].lower()
+            gameName = parts[1] if len(parts) > 1 else None
+
+        # Validate input
+        if gameID and gameName:
+            await ctx.send(f"@{ctx.author.name}, please provide either a game ID or a game name, not both.")
+            return None, None, None, None
+
+        return gameID, skipReviews, gameName, channel_name
+
+    async def send_message(self, ctx, channel_name, reply):
+        """Send a message to a specified channel or the current context."""
         if channel_name:
             connected_channels = [channel.name.lower() for channel in self.bot.connected_channels]
             if channel_name in connected_channels:
@@ -254,11 +260,13 @@ class Spc(commands.Cog):
     async def find_game_id_by_name(self, game_name: str) -> int:
         """Find the Steam App ID by game name using fuzzy search."""
         self.logger.info(f"Searching for game by name: {game_name}")
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT ID, Name FROM Steam_Game WHERE Name LIKE ?', (f'%{game_name}%',))
-        games = cursor.fetchall()
-        conn.close()
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute('SELECT ID, Name FROM Steam_Game WHERE Name LIKE ?', (f'%{game_name}%',)) as cursor:
+                    games = await cursor.fetchall()
+        except Exception as e:
+            self.logger.error(f"Error during game search: {e}", exc_info=True)
+            return None
 
         if not games:
             return None
@@ -283,10 +291,9 @@ class Spc(commands.Cog):
         """Retrieve the current number of players for a given Steam App ID."""
         params = {
             'appid': app_id
-            # 'key': self.steam_api_key  # Typically not required for this endpoint
         }
         try:
-            async with self.session.get("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", params=params) as response:
+            async with self.session.get("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", params=params, timeout=10) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch player count for App ID {app_id}: {response.status}")
                     return None
@@ -307,7 +314,7 @@ class Spc(commands.Cog):
             'language': 'all'
         }
         try:
-            async with self.session.get(url, params=params) as response:
+            async with self.session.get(url, params=params, timeout=10) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch reviews for App ID {app_id}: {response.status}")
                     return "Could not fetch reviews data."
@@ -332,7 +339,7 @@ class Spc(commands.Cog):
             'appids': app_id  # Correct parameter name
         }
         try:
-            async with self.session.get("https://store.steampowered.com/api/appdetails", params=params) as response:
+            async with self.session.get("https://store.steampowered.com/api/appdetails", params=params, timeout=10) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch game details for App ID {app_id}: {response.status}")
                     return None
