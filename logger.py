@@ -4,12 +4,26 @@ import sys
 import os
 from logging.handlers import RotatingFileHandler
 from threading import Lock
+from logdna import LogDNAHandler  # Import LogDNAHandler for logging to LogDNA
+import configparser
+
+# Load configuration from config.ini
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+# Set LOGDNA_INGESTION_KEY from config.ini if not already set in environment variables
+if 'Logging' in config and 'LOGDNA_INGESTION_KEY' in config['Logging']:
+    os.environ.setdefault('LOGDNA_INGESTION_KEY', config['Logging']['LOGDNA_INGESTION_KEY'])
 
 # Create a lock for thread safety
 _logger_setup_lock = Lock()
 
 # Define a common formatter for all handlers
 _formatter = logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s')
+
+# Define a new log level for user messages
+USER_MESSAGE_LEVEL = 25
+logging.addLevelName(USER_MESSAGE_LEVEL, 'MESSAGE')
 
 def setup_logger(name='twitch_bot', level=logging.DEBUG, log_file='bot.log', max_bytes=5*1024*1024, backup_count=3, handlers=None):
     """Setup a centralized logger with log rotation for the bot.
@@ -34,6 +48,7 @@ def setup_logger(name='twitch_bot', level=logging.DEBUG, log_file='bot.log', max
                 # Create default handlers if no custom handlers are provided
                 logger.addHandler(create_console_handler(level))
                 logger.addHandler(create_file_handler(log_file, max_bytes, backup_count, level))
+                logger.addHandler(create_logdna_handler(level))
             # Set logger level after adding handlers
             logger.setLevel(level)
 
@@ -52,6 +67,33 @@ def create_file_handler(log_file, max_bytes, backup_count, level):
     file_handler.setLevel(level)
     file_handler.setFormatter(_formatter)
     return file_handler
+
+def create_logdna_handler(level):
+    """Create a LogDNA handler for logging."""
+    logdna_ingestion_key = os.getenv('LOGDNA_INGESTION_KEY')
+    if logdna_ingestion_key:
+        logdna_options = {
+            'app': 'TwitchBot',
+            'env': 'production'
+        }
+        logdna_handler = LogDNAHandler(logdna_ingestion_key, options=logdna_options)
+        logdna_handler.setLevel(level)
+        return logdna_handler
+    else:
+        # If LogDNA key is not provided, create a handler that logs this issue
+        missing_logdna_handler = logging.StreamHandler(sys.stdout)
+        missing_logdna_handler.setLevel(logging.WARNING)
+        missing_logdna_handler.setFormatter(_formatter)
+        missing_logdna_handler.handle(logging.LogRecord(
+            name='logdna',
+            level=logging.WARNING,
+            pathname=__file__,
+            lineno=0,
+            msg='LOGDNA_INGESTION_KEY environment variable is missing. LogDNA logging will not be enabled.',
+            args=None,
+            exc_info=None
+        ))
+        return missing_logdna_handler
 
 # Load log level from environment, default to DEBUG if not set
 log_level_str = os.getenv('LOG_LEVEL', 'DEBUG').upper()
@@ -75,3 +117,9 @@ valid_levels = {
 log_level = valid_levels[log_level_str]
 
 setup_logger(level=log_level)
+
+# Log user messages
+def log_user_message(logger, message):
+    """Logs user messages for debugging purposes."""
+    if logger.isEnabledFor(USER_MESSAGE_LEVEL):
+        logger.log(USER_MESSAGE_LEVEL, f"User message: {message}")

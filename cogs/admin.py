@@ -34,7 +34,7 @@ class Admin(commands.Cog):
             return
         try:
             module_name = f"cogs.{cog}" if not cog.startswith("cogs.") else cog
-            await self.bot.load_extension(module_name)
+            self.bot.load_module(module_name)
             await ctx.send(f"@{ctx.author.name}, successfully loaded cog '{cog}'.")
             self.logger.info(f"Successfully loaded cog '{cog}'.")
         except Exception as e:
@@ -52,7 +52,7 @@ class Admin(commands.Cog):
             return
         try:
             module_name = f"cogs.{cog}" if not cog.startswith("cogs.") else cog
-            await self.bot.unload_extension(module_name)
+            self.bot.unload_module(module_name)
             await ctx.send(f"@{ctx.author.name}, successfully unloaded cog '{cog}'.")
             self.logger.info(f"Successfully unloaded cog '{cog}'.")
         except Exception as e:
@@ -70,7 +70,7 @@ class Admin(commands.Cog):
             return
         try:
             module_name = f"cogs.{cog}" if not cog.startswith("cogs.") else cog
-            await self.bot.reload_extension(module_name)
+            self.bot.reload_module(module_name)
             await ctx.send(f"@{ctx.author.name}, successfully reloaded cog '{cog}'.")
             self.logger.info(f"Successfully reloaded cog '{cog}'.")
         except Exception as e:
@@ -89,7 +89,7 @@ class Admin(commands.Cog):
         failed = []
         for extension in COGS:
             try:
-                await self.bot.reload_extension(extension)
+                self.bot.reload_module(extension)
                 self.logger.info(f"Successfully reloaded cog '{extension}'.")
             except Exception as e:
                 failed.append(f'{extension}: {e}')

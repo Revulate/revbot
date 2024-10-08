@@ -12,6 +12,17 @@ from utils import CustomContext  # Adjust import path if necessary
 import configparser
 import random
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Load config.ini file
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+# Set LOGDNA_INGESTION_KEY if it's defined in config.ini
+if 'Logging' in config and 'LOGDNA_INGESTION_KEY' in config['Logging']:
+    os.environ['LOGDNA_INGESTION_KEY'] = config['Logging']['LOGDNA_INGESTION_KEY']
+
 # List of cogs
 COGS = [
     'cogs.gpt',
@@ -24,9 +35,6 @@ COGS = [
     'cogs.spc',
     'cogs.dnd'  # Add this line to include the DnD cog
 ]
-
-# Load environment variables from .env file
-load_dotenv()
 
 class TwitchBot(commands.Bot):
     def __init__(self):
@@ -55,7 +63,7 @@ class TwitchBot(commands.Bot):
         self.context_class = CustomContext
 
         # Load cogs
-        self.loop.run_until_complete(self.load_cogs())
+        self.load_cogs()
 
     def load_config(self):
         """Load configuration from a centralized configuration file."""
@@ -103,12 +111,11 @@ class TwitchBot(commands.Bot):
 
         self.logger.error("Exceeded maximum retries to fetch user data.")
 
-    async def load_cogs(self):
+    def load_cogs(self):
         """Load all cogs as modules."""
-        loop = asyncio.get_event_loop()
         for cog in COGS:
             try:
-                await loop.run_in_executor(None, self.load_module, cog)
+                self.load_module(cog)
                 cog_name = cog.split('.')[-1].capitalize()
                 self.logger.info(f"Loaded extension: {cog_name}")
             except Exception as e:
@@ -132,12 +139,16 @@ class TwitchBot(commands.Bot):
             self.logger.error(f"Argument parsing failed: {message.content}", exc_info=True)
         except commands.MissingRequiredArgument as e:
             self.logger.error(f"Missing required argument: {message.content}", exc_info=True)
+            await message.channel.send(f"@{message.author.name}, you're missing a required argument for the command.")
         except commands.CheckFailure as e:
             self.logger.error(f"Check failed for command: {message.content}", exc_info=True)
+            await message.channel.send(f"@{message.author.name}, you don't have permission to use that command.")
         except commands.CommandOnCooldown as e:
             self.logger.warning(f"Command on cooldown: {message.content}")
+            await message.channel.send(f"@{message.author.name}, this command is on cooldown. Please try again in {round(e.retry_after, 2)} seconds.")
         except Exception as e:
             self.logger.error(f"Error handling message: {e}", exc_info=True)
+            await message.channel.send(f"@{message.author.name}, an unexpected error occurred while processing your command.")
 
     def _validate_message(self, message):
         """Validate the incoming message to ensure it has necessary attributes."""

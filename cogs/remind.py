@@ -3,7 +3,7 @@
 import logging
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 import aiosqlite
 
@@ -122,11 +122,12 @@ class Remind(commands.Cog):
             self.logger.info("check_timed_reminders task has been cancelled.")
 
     async def send_reminder(self, reminder: Reminder, channel):
-        time_since_set = format_time_delta(datetime.now(timezone.utc) - reminder.created_at) if reminder.created_at else "unknown"
+        remind_time = reminder.remind_time or reminder.created_at
+        time_since_set = format_time_delta(datetime.now(timezone.utc) - remind_time) if remind_time else "unknown"
         if reminder.user:
-            message = f"@{reminder.target.name}, reminder from @{reminder.user.name} {time_since_set} ago - {reminder.message}"
+            message = f"@{reminder.target.name}, reminder from @{reminder.user.name} set {time_since_set} ago - {reminder.message}"
         else:
-            message = f"@{reminder.target.name}, reminder {time_since_set} ago - {reminder.message}"
+            message = f"@{reminder.target.name}, reminder set {time_since_set} ago - {reminder.message}"
         if reminder.private:
             try:
                 await reminder.target.send(message)
@@ -220,6 +221,10 @@ class Remind(commands.Cog):
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
 
+        # Parse reminder time from message
+        remind_time_delta, message = parse_time(message)
+        remind_time = created_at + remind_time_delta if remind_time_delta else None
+
         reminder = Reminder(
             reminder_id=reminder_id,
             user=ctx.author,
@@ -227,6 +232,7 @@ class Remind(commands.Cog):
             message=message,
             channel_id=channel_id,
             channel_name=channel_name,
+            remind_time=remind_time,
             created_at=created_at,
             trigger_on_message=True  # Ensure trigger_on_message is set to True for the command to work
         )
@@ -236,11 +242,11 @@ class Remind(commands.Cog):
                 '''INSERT INTO reminders (id, user_id, username, target_id, target_name, channel_id, channel_name,
                 message, remind_time, private, trigger_on_message, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (reminder.id, reminder.user.id, reminder.user.name, reminder.target.id, reminder.target.name, reminder.channel_id,
-                 reminder.channel_name, reminder.message, None, int(reminder.private), int(reminder.trigger_on_message), int(reminder.active), reminder.created_at.isoformat())
+                 reminder.channel_name, reminder.message, remind_time.isoformat() if remind_time else None, int(reminder.private), int(reminder.trigger_on_message), int(reminder.active), reminder.created_at.isoformat())
             )
             await conn.commit()
 
-        await ctx.send(f"@{ctx.author.name}, reminder set for @{target.name}: {message}. ID: {reminder.id}")
+        await ctx.send(f"@{ctx.author.name}, reminder set for @{target.name}: {message} - ID: {reminder.id}")
 
     def is_command(self, message):
         message_content = message.content.strip()
