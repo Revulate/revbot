@@ -69,17 +69,26 @@ class Preview(commands.Cog):
             return
 
         channel_info = await self.get_channel_info(channel_name)
+        if channel_info is None or 'id' not in channel_info:
+            await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
+            return
         if not channel_info:
             await ctx.send(f"@{ctx.author.name}, could not find channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
             return
 
         user_id = channel_info.get("id")
+        if user_id is None:
+            await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user ID.")
+            return
         is_live = channel_info.get("is_live", False)
         title = channel_info.get("title", "Unknown")
         preview_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg"
 
         if is_live:
             stream_info = await self.get_stream_info(user_id)
+            if stream_info is None:
+                await ctx.send(f"@{ctx.author.name}, no live stream data available for '{channel_name}'.")
+                return
             if stream_info:
                 viewer_count = stream_info.get("viewer_count", 0)
                 started_at = stream_info.get("started_at")
