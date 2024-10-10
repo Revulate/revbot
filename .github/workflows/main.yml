@@ -1,0 +1,64 @@
+name: Twitch Bot CI/CD Pipeline
+
+# Trigger workflows on push or pull request to the main branch
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Set up Python environment
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Linting using flake8
+      - name: Run Linter
+        run: |
+          pip install flake8
+          flake8 .
+
+      # Run unit tests using pytest
+      - name: Run Tests
+        run: |
+          pip install pytest
+          pytest --cov=.
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      # Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Deploy to Raspberry Pi
+      - name: Deploy to Raspberry Pi
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          scp -i $SSH_KEY -r . $SSH_USER@$SSH_HOST:/home/pi/revubot
+          ssh -i $SSH_KEY $SSH_USER@$SSH_HOST "sudo systemctl restart revubot.service"
