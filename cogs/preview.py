@@ -12,30 +12,16 @@ class Preview(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.client_id = os.getenv("CLIENT_ID", "")
-        self.client_secret = os.getenv("TWITCH_OAUTH_TOKEN", "")
+        # Removed client_secret as it is not needed
         self.oauth_token = None
 
     async def get_oauth_token(self):
         """Fetch OAuth token for Twitch API."""
-        if not self.client_id or not self.client_secret:
-            raise ValueError("Twitch client ID and client secret must be set.")
-        if self.oauth_token:
-            return self.oauth_token
-
-        url = "https://id.twitch.tv/oauth2/token"
-        params = {
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-            "grant_type": "client_credentials"
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, params=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self.oauth_token = data.get("access_token")
-                    return self.oauth_token
-                else:
-                    raise Exception("Failed to get OAuth token from Twitch API.")
+        if not self.oauth_token:
+            self.oauth_token = os.getenv("TWITCH_OAUTH_TOKEN")
+            if not self.oauth_token:
+                raise ValueError("Twitch OAuth token must be set.")
+        return self.oauth_token
 
     async def get_channel_info(self, channel_name):
         """Fetch channel information from Twitch API."""
@@ -84,7 +70,7 @@ class Preview(commands.Cog):
 
         channel_info = await self.get_channel_info(channel_name)
         if not channel_info:
-            await ctx.send(f"@{ctx.author.name}, could not find channel information for '{channel_name}'. Please ensure the channel name is correct.")
+            await ctx.send(f"@{ctx.author.name}, could not find channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
             return
 
         user_id = channel_info.get("id")
