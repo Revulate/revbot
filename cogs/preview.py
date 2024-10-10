@@ -48,15 +48,15 @@ class Preview(commands.Cog):
             "Authorization": f"Bearer {token}",
             "Client-ID": self.client_id
         }
-        print(f"[DEBUG] Requesting channel info for '{channel_name}' with URL: {url}")
+        self.bot.logger.debug(f"Requesting channel info for '{channel_name}' with URL: {url}")
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
-                print(f"[DEBUG] Received response status: {response.status}")
+                self.bot.logger.debug(f"Received response status: {response.status}")
                 response_text = await response.text()
-                print(f"[DEBUG] Response content: {response_text}")
+                self.bot.logger.debug(f"Response content: {response_text}")
                 if response.status == 200:
                     data = await response.json()
-                    print(f"[DEBUG] Channel info data: {data}")
+                    self.bot.logger.debug(f"Channel info data: {data}")
                     users = data.get("data", [])
                     if users:
                         return users[0]
@@ -64,7 +64,7 @@ class Preview(commands.Cog):
                     self.oauth_token = None  # Reset the token to force refresh
                     self.bot.logger.error("Unauthorized request. Token might be expired.")
                 else:
-                    print(f"[ERROR] Failed to fetch channel info: {response.status}")
+                    self.bot.logger.error(f"Failed to fetch channel info: {response.status}")
                 return None
 
     async def get_stream_info(self, user_login):
@@ -106,16 +106,16 @@ class Preview(commands.Cog):
             retry_count = 3
             for attempt in range(retry_count):
                 try:
-                    print(f"[DEBUG] Getting channel info for '{channel_name}' (Attempt {attempt + 1})")
+                    self.bot.logger.debug(f"Getting channel info for '{channel_name}' (Attempt {attempt + 1})")
                     channel_info = await self.get_channel_info(channel_name)
                     if channel_info is None or not channel_info.get('id'):
-                        print(f"[ERROR] Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
+                        self.bot.logger.error(f"Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
                         await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
                         return
 
                     user_login = channel_info.get("login")
-                    if user_id is None:
-                        await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user ID.")
+                    if user_login is None:
+                        await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user login.")
                         return
 
                     is_live = await self.get_stream_info(user_login) is not None
@@ -123,7 +123,7 @@ class Preview(commands.Cog):
                     preview_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg"
 
                     if is_live:
-                        print(f"[DEBUG] Channel '{channel_name}' is live. Fetching stream info.")
+                        self.bot.logger.debug(f"Channel '{channel_name}' is live. Fetching stream info.")
                         stream_info = await self.get_stream_info(user_login)
                         if stream_info is None:
                             await ctx.send(f"@{ctx.author.name}, no live stream data available for '{channel_name}'.")
@@ -137,15 +137,15 @@ class Preview(commands.Cog):
                             await ctx.send(
                                 f"@{ctx.author.name}, {channel_name} is live! Title: {title}, Viewers: {viewer_count}, Live for: {time_live}. Preview: {preview_url}"
                             )
-                            print(f"[DEBUG] Sent live stream info for '{channel_name}' to chat.")
+                            self.bot.logger.debug(f"Sent live stream info for '{channel_name}' to chat.")
                         else:
                             await ctx.send(f"@{ctx.author.name}, {channel_name} is live but the start time is unavailable. Preview: {preview_url}")
                     else:
                         await ctx.send(f"@{ctx.author.name}, {channel_name} is currently offline. Preview: {preview_url}")
-                        print(f"[DEBUG] Sent offline info for '{channel_name}' to chat.")
+                        self.bot.logger.debug(f"Sent offline info for '{channel_name}' to chat.")
                     break
                 except Exception as e:
-                    print(f"[ERROR] Attempt {attempt + 1} failed with error: {e}")
+                    self.bot.logger.error(f"Attempt {attempt + 1} failed with error: {e}")
                     if attempt < retry_count - 1:
                         await sleep(2)  # Wait before retrying
                     else:
