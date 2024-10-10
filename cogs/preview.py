@@ -67,29 +67,29 @@ class Preview(commands.Cog):
                     print(f"[ERROR] Failed to fetch channel info: {response.status}")
                 return None
 
-    async def get_stream_info(self, user_id):
+    async def get_stream_info(self, user_login):
         """Fetch stream information from Twitch API."""
         token = await self.get_oauth_token()
-        url = f"https://api.twitch.tv/helix/streams?user_id={user_id}"
+        url = f"https://api.twitch.tv/helix/streams?user_login={user_login}"
         headers = {
             "Authorization": f"Bearer {token}",
             "Client-ID": self.client_id
         }
-        print(f"[DEBUG] Requesting stream info for user_id '{user_id}' with URL: {url}")
+        self.bot.logger.debug(f"Requesting stream info for user_login '{user_login}' with URL: {url}")
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
-                print(f"[DEBUG] Received response status: {response.status}")
+                self.bot.logger.debug(f"Received response status: {response.status}")
                 if response.status == 200:
                     data = await response.json()
-                    print(f"[DEBUG] Stream info data: {data}")
+                    self.bot.logger.debug(f"Stream info data: {data}")
                     streams = data.get("data", [])
                     if streams:
                         return streams[0]
                 elif response.status == 401:
                     self.oauth_token = None  # Reset the token to force refresh
-                    print("[ERROR] Unauthorized request. Token might be expired.")
+                    self.bot.logger.error("Unauthorized request. Token might be expired.")
                 else:
-                    print(f"[ERROR] Failed to fetch stream info: {response.status}")
+                    self.bot.logger.error(f"Failed to fetch stream info: {response.status}")
                 return None
 
     @commands.command(name="preview")
@@ -113,18 +113,18 @@ class Preview(commands.Cog):
                         await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
                         return
 
-                    user_id = channel_info.get("id")
+                    user_login = channel_info.get("login")
                     if user_id is None:
                         await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user ID.")
                         return
 
-                    is_live = await self.get_stream_info(user_id) is not None
+                    is_live = await self.get_stream_info(user_login) is not None
                     title = channel_info.get("description", "No title available")
                     preview_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg"
 
                     if is_live:
                         print(f"[DEBUG] Channel '{channel_name}' is live. Fetching stream info.")
-                        stream_info = await self.get_stream_info(user_id)
+                        stream_info = await self.get_stream_info(user_login)
                         if stream_info is None:
                             await ctx.send(f"@{ctx.author.name}, no live stream data available for '{channel_name}'.")
                             return

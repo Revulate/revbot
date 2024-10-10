@@ -29,7 +29,6 @@ COGS = [
     'cogs.roll',
     'cogs.rate',
     'cogs.afk',
-    'cogs.preview',
     # 'cogs.react',
     'cogs.remind',
     'cogs.admin',
@@ -153,7 +152,7 @@ class TwitchBot(commands.Bot):
 
     def _validate_message(self, message):
         """Validate the incoming message to ensure it has necessary attributes."""
-        if not message or not message.channel or not message.author:
+        if not message or not message.channel or message.author is None:
             self.log_missing_data(message)
             return False
         return True
@@ -175,6 +174,11 @@ class TwitchBot(commands.Bot):
     def log_missing_data(self, message):
         """Log missing data in message."""
         content = getattr(message, 'content', 'None')
+        channel = getattr(message.channel, 'name', 'None')
+        author = getattr(message.author, 'name', 'Unknown')  # Set default to 'Unknown' if author is None
+        self.logger.warning(
+            f"Received a message with missing data. Content: {content}, Author: {author}, Channel: {channel}"
+        )
         channel = getattr(message.channel, 'name', 'None')
         author = getattr(message.author, 'name', 'None')
         self.logger.warning(
