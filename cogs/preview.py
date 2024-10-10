@@ -24,25 +24,10 @@ class Preview(commands.Cog):
         """Fetch OAuth token for Twitch API."""
         # Refresh token if expired
         if not self.oauth_token or (self.token_expiry and datetime.datetime.now() >= self.token_expiry):
-            token_url = "https://id.twitch.tv/oauth2/token"
-            client_secret = os.getenv("CLIENT_SECRET")
-            if not client_secret:
-                raise ValueError("CLIENT_SECRET must be set in the environment variables.")
-            params = {
-                "client_id": self.client_id,
-                "client_secret": client_secret,
-                "grant_type": "client_credentials"
-            }
-            async with aiohttp.ClientSession() as session:
-                async with session.post(token_url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        self.oauth_token = data.get("access_token")
-                        expires_in = data.get("expires_in", 3600)
-                        self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
-                        self.bot.logger.debug(f"OAuth token retrieved and valid until: {self.token_expiry}")
-                    else:
-                        raise ValueError("Failed to retrieve OAuth token. Please check your credentials.")
+            
+            self.bot.logger.debug(f"OAuth token retrieved and valid until: {self.token_expiry}")
+        else:
+            raise ValueError("Failed to retrieve OAuth token. Please check your credentials.")
         return self.oauth_token
 
     async def get_channel_info(self, channel_name):
