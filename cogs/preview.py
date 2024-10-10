@@ -35,7 +35,7 @@ class Preview(commands.Cog):
                         self.oauth_token = data.get("access_token")
                         expires_in = data.get("expires_in", 3600)
                         self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
-                        print("[DEBUG] OAuth token retrieved and valid until: ", self.token_expiry)
+                        self.bot.logger.debug("OAuth token retrieved and valid until: ", self.token_expiry)
                     else:
                         raise ValueError("Failed to retrieve OAuth token. Please check your credentials.")
         return self.oauth_token
@@ -62,7 +62,7 @@ class Preview(commands.Cog):
                         return users[0]
                 elif response.status == 401:
                     self.oauth_token = None  # Reset the token to force refresh
-                    print("[ERROR] Unauthorized request. Token might be expired.")
+                    self.bot.logger.error("Unauthorized request. Token might be expired.")
                 else:
                     print(f"[ERROR] Failed to fetch channel info: {response.status}")
                 return None
