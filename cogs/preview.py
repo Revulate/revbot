@@ -29,7 +29,7 @@ class Preview(commands.Cog):
     async def get_channel_info(self, channel_name):
         """Fetch channel information from Twitch API."""
         token = await self.get_oauth_token()
-        url = f"https://api.twitch.tv/helix/search/channels?query={channel_name}"
+        url = f"https://api.twitch.tv/helix/users?login={channel_name}"
         headers = {
             "Authorization": f"Bearer {token}",
             "Client-ID": self.client_id
@@ -43,10 +43,9 @@ class Preview(commands.Cog):
                 if response.status == 200:
                     data = await response.json()
                     print(f"[DEBUG] Channel info data: {data}")
-                    channels = data.get("data", [])
-                    for channel in channels:
-                        if channel.get("broadcaster_login", "").lower() == channel_name.lower():
-                            return channel
+                    users = data.get("data", [])
+                    if users:
+                        return users[0]
                 elif response.status == 401:
                     self.oauth_token = None  # Reset the token to force refresh
                     print("[ERROR] Unauthorized request. Token might be expired.")
@@ -94,6 +93,7 @@ class Preview(commands.Cog):
             channel_info = await self.get_channel_info(channel_name)
             if channel_info is None or not channel_info.get('id'):
                 print(f"[ERROR] Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
+                print(f"[ERROR] Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
                 await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
                 return
 
@@ -102,7 +102,7 @@ class Preview(commands.Cog):
                 await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user ID.")
                 return
 
-            is_live = channel_info.get("is_live", False)
+            is_live = channel_info.get("type", "") == "live"
             title = channel_info.get("title", "Unknown")
             preview_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg"
 
@@ -125,7 +125,7 @@ class Preview(commands.Cog):
                 else:
                     await ctx.send(f"@{ctx.author.name}, {channel_name} is live but the start time is unavailable. Preview: {preview_url}")
             else:
-                last_live = channel_info.get("started_at") or None
+                last_live = channel_info.get("offline_image_url") or None
                 if last_live:
                     last_live_time = datetime.datetime.fromisoformat(last_live.replace("Z", "+00:00"))
                     time_since_live = datetime.datetime.now(datetime.timezone.utc) - last_live_time
