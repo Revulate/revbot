@@ -8,12 +8,14 @@ class Preview(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.client_id = os.getenv("TWITCH_CLIENT_ID")
-        self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+        self.client_id = os.getenv("TWITCH_CLIENT_ID", "")
+        self.client_secret = os.getenv("TWITCH_CLIENT_SECRET", "")
         self.oauth_token = None
 
     async def get_oauth_token(self):
         """Fetch OAuth token for Twitch API."""
+        if not self.client_id or not self.client_secret:
+            raise ValueError("Twitch client ID and client secret must be set.")
         if self.oauth_token:
             return self.oauth_token
 
@@ -79,7 +81,7 @@ class Preview(commands.Cog):
 
         channel_info = await self.get_channel_info(channel_name)
         if not channel_info:
-            await ctx.send(f"@{ctx.author.name}, could not find channel information for {channel_name}.")
+            await ctx.send(f"@{ctx.author.name}, could not find channel information for '{channel_name}'. Please ensure the channel name is correct.")
             return
 
         user_id = channel_info.get("id")
@@ -100,7 +102,7 @@ class Preview(commands.Cog):
             else:
                 await ctx.send(f"@{ctx.author.name}, could not retrieve stream info for {channel_name}.")
         else:
-            last_live = channel_info.get("started_at")
+            last_live = channel_info.get("started_at") or None
             if last_live:
                 last_live_time = datetime.datetime.fromisoformat(last_live.replace("Z", "+00:00"))
                 time_since_live = datetime.datetime.now(datetime.timezone.utc) - last_live_time
