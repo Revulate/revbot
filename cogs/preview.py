@@ -1,15 +1,18 @@
 import os
+from dotenv import load_dotenv
 import aiohttp
 import datetime
 from twitchio.ext import commands
+
+load_dotenv()
 
 class Preview(commands.Cog):
     """Cog for displaying the preview thumbnail and details of a specified Twitch stream."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.client_id = os.getenv("TWITCH_CLIENT_ID", "")
-        self.client_secret = os.getenv("TWITCH_CLIENT_SECRET", "")
+        self.client_id = os.getenv("CLIENT_ID", "")
+        self.client_secret = os.getenv("TWITCH_OAUTH_TOKEN", "")
         self.oauth_token = None
 
     async def get_oauth_token(self):
