@@ -11,7 +11,7 @@ from logger import setup_logger
 from utils import CustomContext  # Adjust import path if necessary
 import configparser
 import random
-from twitch_utility import TwitchAPI  # Import the TwitchAPI utility
+from twitch_helix_client import TwitchAPI  # Updated import to avoid circular import issue
 
 # Load environment variables from .env file
 load_dotenv()
