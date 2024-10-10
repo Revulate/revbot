@@ -29,6 +29,7 @@ COGS = [
     'cogs.roll',
     'cogs.rate',
     'cogs.afk',
+    'cogs.preview',
     # 'cogs.react',
     'cogs.remind',
     'cogs.admin',
