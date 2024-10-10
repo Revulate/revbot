@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import aiohttp
 import datetime
 from twitchio.ext import commands
-from asyncio import Semaphore
+from asyncio import Semaphore, sleep
 
 load_dotenv()
 
@@ -16,14 +16,28 @@ class Preview(commands.Cog):
         self.bot = bot
         self.client_id = os.getenv("CLIENT_ID", "")
         self.oauth_token = None
+        self.token_expiry = None
 
     async def get_oauth_token(self):
         """Fetch OAuth token for Twitch API."""
-        if not self.oauth_token:
-            self.oauth_token = os.getenv("TWITCH_OAUTH_TOKEN")
-            if not self.oauth_token:
-                raise ValueError("Twitch OAuth token must be set.")
-        print("[DEBUG] OAuth token retrieved.")
+        # Refresh token if expired
+        if not self.oauth_token or (self.token_expiry and datetime.datetime.now() >= self.token_expiry):
+            token_url = "https://id.twitch.tv/oauth2/token"
+            params = {
+                "client_id": self.client_id,
+                "client_secret": os.getenv("CLIENT_SECRET"),
+                "grant_type": "client_credentials"
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(token_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        self.oauth_token = data.get("access_token")
+                        expires_in = data.get("expires_in", 3600)
+                        self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
+                        print("[DEBUG] OAuth token retrieved and valid until: ", self.token_expiry)
+                    else:
+                        raise ValueError("Failed to retrieve OAuth token. Please check your credentials.")
         return self.oauth_token
 
     async def get_channel_info(self, channel_name):
@@ -89,52 +103,54 @@ class Preview(commands.Cog):
                 await ctx.send(f"@{ctx.author.name}, please provide a channel name to get the preview thumbnail.")
                 return
 
-            print(f"[DEBUG] Getting channel info for '{channel_name}'")
-            channel_info = await self.get_channel_info(channel_name)
-            if channel_info is None or not channel_info.get('id'):
-                print(f"[ERROR] Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
-                print(f"[ERROR] Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
-                await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
-                return
+            retry_count = 3
+            for attempt in range(retry_count):
+                try:
+                    print(f"[DEBUG] Getting channel info for '{channel_name}' (Attempt {attempt + 1})")
+                    channel_info = await self.get_channel_info(channel_name)
+                    if channel_info is None or not channel_info.get('id'):
+                        print(f"[ERROR] Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
+                        await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
+                        return
 
-            user_id = channel_info.get("id")
-            if user_id is None:
-                await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user ID.")
-                return
+                    user_id = channel_info.get("id")
+                    if user_id is None:
+                        await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user ID.")
+                        return
 
-            is_live = channel_info.get("type", "") == "live"
-            title = channel_info.get("title", "Unknown")
-            preview_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg"
+                    is_live = await self.get_stream_info(user_id) is not None
+                    title = channel_info.get("description", "No title available")
+                    preview_url = f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg"
 
-            if is_live:
-                print(f"[DEBUG] Channel '{channel_name}' is live. Fetching stream info.")
-                stream_info = await self.get_stream_info(user_id)
-                if stream_info is None:
-                    await ctx.send(f"@{ctx.author.name}, no live stream data available for '{channel_name}'.")
-                    return
+                    if is_live:
+                        print(f"[DEBUG] Channel '{channel_name}' is live. Fetching stream info.")
+                        stream_info = await self.get_stream_info(user_id)
+                        if stream_info is None:
+                            await ctx.send(f"@{ctx.author.name}, no live stream data available for '{channel_name}'.")
+                            return
 
-                viewer_count = stream_info.get("viewer_count", 0)
-                started_at = stream_info.get("started_at")
-                if started_at:
-                    start_time = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-                    time_live = datetime.datetime.now(datetime.timezone.utc) - start_time
-                    await ctx.send(
-                        f"@{ctx.author.name}, {channel_name} is live! Title: {title}, Viewers: {viewer_count}, Live for: {time_live}. Preview: {preview_url}"
-                    )
-                    print(f"[DEBUG] Sent live stream info for '{channel_name}' to chat.")
-                else:
-                    await ctx.send(f"@{ctx.author.name}, {channel_name} is live but the start time is unavailable. Preview: {preview_url}")
-            else:
-                last_live = channel_info.get("offline_image_url") or None
-                if last_live:
-                    last_live_time = datetime.datetime.fromisoformat(last_live.replace("Z", "+00:00"))
-                    time_since_live = datetime.datetime.now(datetime.timezone.utc) - last_live_time
-                    await ctx.send(
-                        f"@{ctx.author.name}, {channel_name} is currently offline. Last live: {time_since_live} ago. Preview: {preview_url}"
-                    )
-                else:
-                    await ctx.send(f"@{ctx.author.name}, {channel_name} is currently offline. Preview: {preview_url}")
-                print(f"[DEBUG] Sent offline info for '{channel_name}' to chat.")
+                        viewer_count = stream_info.get("viewer_count", 0)
+                        started_at = stream_info.get("started_at")
+                        if started_at:
+                            start_time = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                            time_live = datetime.datetime.now(datetime.timezone.utc) - start_time
+                            await ctx.send(
+                                f"@{ctx.author.name}, {channel_name} is live! Title: {title}, Viewers: {viewer_count}, Live for: {time_live}. Preview: {preview_url}"
+                            )
+                            print(f"[DEBUG] Sent live stream info for '{channel_name}' to chat.")
+                        else:
+                            await ctx.send(f"@{ctx.author.name}, {channel_name} is live but the start time is unavailable. Preview: {preview_url}")
+                    else:
+                        await ctx.send(f"@{ctx.author.name}, {channel_name} is currently offline. Preview: {preview_url}")
+                        print(f"[DEBUG] Sent offline info for '{channel_name}' to chat.")
+                    break
+                except Exception as e:
+                    print(f"[ERROR] Attempt {attempt + 1} failed with error: {e}")
+                    if attempt < retry_count - 1:
+                        await sleep(2)  # Wait before retrying
+                    else:
+                        await ctx.send(f"@{ctx.author.name}, an error occurred while processing your request. Please try again later.")
+
 
 def prepare(bot):
     bot.add_cog(Preview(bot))
