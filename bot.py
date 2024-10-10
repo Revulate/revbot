@@ -11,6 +11,7 @@ from logger import setup_logger
 from utils import CustomContext  # Adjust import path if necessary
 import configparser
 import random
+from twitch_utility import TwitchAPI  # Import the TwitchAPI utility
 
 # Load environment variables from .env file
 load_dotenv()
@@ -63,6 +64,9 @@ class TwitchBot(commands.Bot):
         # Set the custom context class
         self.context_class = CustomContext
 
+        # Instantiate the TwitchAPI utility
+        self.twitch_api = TwitchAPI()
+
         # Load cogs
         self.load_cogs()
 
@@ -84,6 +88,14 @@ class TwitchBot(commands.Bot):
     async def event_ready(self):
         self.logger.info(f'Logged in as | {self.nick}')
         await self.fetch_user_id()
+
+        # Example use: Fetch streams for channels when the bot is ready
+        try:
+            streams = await self.twitch_api.get_streams(["afro", "cohhcarnage"])
+            for stream in streams:
+                self.logger.info(f"Stream found: {stream['user_name']} is live with {stream['viewer_count']} viewers.")
+        except Exception as e:
+            self.logger.error(f"Error fetching streams: {e}", exc_info=True)
 
     async def event_channel_joined(self, channel):
         self.logger.info(f"Joined channel: {channel.name}")
