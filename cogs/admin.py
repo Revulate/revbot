@@ -5,6 +5,7 @@ import time
 import psutil
 from datetime import timedelta  # Ensure this import is present
 from twitchio.ext import commands
+from bot import COGS
 from logger import setup_logger  # Import the centralized logger
 
 class Admin(commands.Cog):

@@ -14,7 +14,9 @@ class Preview(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.client_id = os.getenv("CLIENT_ID", "")
+        self.client_id = os.getenv("CLIENT_ID")
+        if not self.client_id:
+            raise ValueError("CLIENT_ID must be set in the environment variables.")
         self.oauth_token = None
         self.token_expiry = None
 
@@ -23,9 +25,12 @@ class Preview(commands.Cog):
         # Refresh token if expired
         if not self.oauth_token or (self.token_expiry and datetime.datetime.now() >= self.token_expiry):
             token_url = "https://id.twitch.tv/oauth2/token"
+            client_secret = os.getenv("CLIENT_SECRET")
+            if not client_secret:
+                raise ValueError("CLIENT_SECRET must be set in the environment variables.")
             params = {
                 "client_id": self.client_id,
-                "client_secret": os.getenv("CLIENT_SECRET"),
+                "client_secret": client_secret,
                 "grant_type": "client_credentials"
             }
             async with aiohttp.ClientSession() as session:
@@ -35,7 +40,7 @@ class Preview(commands.Cog):
                         self.oauth_token = data.get("access_token")
                         expires_in = data.get("expires_in", 3600)
                         self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
-                        self.bot.logger.debug("OAuth token retrieved and valid until: ", self.token_expiry)
+                        self.bot.logger.debug(f"OAuth token retrieved and valid until: {self.token_expiry}")
                     else:
                         raise ValueError("Failed to retrieve OAuth token. Please check your credentials.")
         return self.oauth_token
@@ -114,9 +119,11 @@ class Preview(commands.Cog):
                         return
 
                     user_login = channel_info.get("login")
-                    if user_login is None:
+                    if not user_login:
+                        self.bot.logger.error(f"Missing login information for '{channel_name}'. Channel info: {channel_info}")
                         await ctx.send(f"@{ctx.author.name}, channel information for '{channel_name}' is incomplete. Unable to retrieve user login.")
                         return
+                    
 
                     is_live = await self.get_stream_info(user_login) is not None
                     title = channel_info.get("description", "No title available")
@@ -130,6 +137,8 @@ class Preview(commands.Cog):
                             return
 
                         viewer_count = stream_info.get("viewer_count", 0)
+                        if viewer_count is None:
+                            viewer_count = 0
                         started_at = stream_info.get("started_at")
                         if started_at:
                             start_time = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
