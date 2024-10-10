@@ -53,12 +53,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      # Deploy to Raspberry Pi
-      - name: Deploy to Raspberry Pi
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_KEY: ${{ secrets.SSH_KEY }}
+      # Deploy locally (Windows PC)
+      - name: Deploy Locally
         run: |
-          scp -i $SSH_KEY -r . $SSH_USER@$SSH_HOST:/home/pi/revubot
-          ssh -i $SSH_KEY $SSH_USER@$SSH_HOST "sudo systemctl restart revubot.service"
+          echo "Deployment step for local Windows PC - adjust this step as needed"
