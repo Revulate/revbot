@@ -18,15 +18,15 @@ jobs:
 
     steps:
       - name: Set up Node.js 20
-        uses: actions/setup-node@v3
+        uses: uses: actions/setup-node@v3.7.0
         with:
           node-version: '20'
 
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: uses: actions/checkout@v3.2.0
 
       - name: Set up Python 3.10
-        uses: actions/setup-python@v4
+        uses: uses: actions/setup-python@v4.2.0
         with:
           python-version: '3.10'
 
@@ -56,7 +56,7 @@ jobs:
     steps:
       # Checkout the repository
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: uses: actions/checkout@v3.2.0
 
       # Deploy locally (Windows PC)
       - name: Deploy Locally
