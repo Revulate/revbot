@@ -38,6 +38,8 @@ class Preview(commands.Cog):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 print(f"[DEBUG] Received response status: {response.status}")
+                response_text = await response.text()
+                print(f"[DEBUG] Response content: {response_text}")
                 if response.status == 200:
                     data = await response.json()
                     print(f"[DEBUG] Channel info data: {data}")
@@ -90,7 +92,8 @@ class Preview(commands.Cog):
 
             print(f"[DEBUG] Getting channel info for '{channel_name}'")
             channel_info = await self.get_channel_info(channel_name)
-            if channel_info is None or 'id' not in channel_info:
+            if channel_info is None or not channel_info.get('id'):
+                print(f"[ERROR] Invalid or missing channel information for '{channel_name}'. Channel info: {channel_info}")
                 await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct or check if your Twitch credentials are properly set.")
                 return
 
