@@ -8,3 +8,4 @@ rapidfuzz
 backoff
 aiosqlite
 logdna
+black
