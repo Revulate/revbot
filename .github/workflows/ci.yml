@@ -79,5 +79,7 @@ jobs:
           ACCESS_TOKEN=${{ secrets.ACCESS_TOKEN }}
           EOF
 
-          # Restart the Twitch bot service
+          # Restart the Twitch bot service without needing a password
           sudo systemctl restart twitch-bot.service
+
+                sudo systemctl restart twitch-bot.service
