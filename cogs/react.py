@@ -1,9 +1,10 @@
 import time
 from twitchio.ext import commands
 
+
 class React(commands.Cog):
     """Cog for reacting to specific messages in chat."""
-    
+
     RATE_LIMIT_SECONDS = 10  # Class-level constant for rate limiting
 
     def __init__(self, bot):
@@ -30,7 +31,10 @@ class React(commands.Cog):
             user_id = message.author.id
 
             # Check if the user has been replied to within the last RATE_LIMIT_SECONDS
-            if user_id in self.last_reply_time and current_time - self.last_reply_time[user_id] < self.RATE_LIMIT_SECONDS:
+            if (
+                user_id in self.last_reply_time
+                and current_time - self.last_reply_time[user_id] < self.RATE_LIMIT_SECONDS
+            ):
                 self.bot.logger.debug(f"Rate limit hit for {message.author.name}")
                 return  # Skip the reply due to rate limit
 
@@ -45,7 +49,10 @@ class React(commands.Cog):
             user_id = message.author.id
 
             # Check if the user has been replied to within the last RATE_LIMIT_SECONDS
-            if user_id in self.last_reply_time and current_time - self.last_reply_time[user_id] < self.RATE_LIMIT_SECONDS:
+            if (
+                user_id in self.last_reply_time
+                and current_time - self.last_reply_time[user_id] < self.RATE_LIMIT_SECONDS
+            ):
                 self.bot.logger.debug(f"Rate limit hit for {message.author.name}")
                 return  # Skip the reply due to rate limit
 
@@ -55,9 +62,13 @@ class React(commands.Cog):
             self.bot.logger.debug(f"Replied to {message.author.name}")
 
         # Check if StreamElements is running a raffle
-        if message.author.name.lower() == "streamelements" and "The Multi-Raffle for 5000 points will end in 15 Seconds" in message.content:
+        if (
+            message.author.name.lower() == "streamelements"
+            and "The Multi-Raffle for 5000 points will end in 15 Seconds" in message.content
+        ):
             await message.channel.send("!jOIn")
             self.bot.logger.debug("Automatically joined the raffle with !jOIn")
+
 
 def prepare(bot):
     bot.add_cog(React(bot))

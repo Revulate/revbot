@@ -5,12 +5,13 @@ from twitchio.ext import commands
 from logger import setup_logger  # Import the centralized logger
 from utils import split_message  # Import the shared split_message function
 
+
 class Rate(commands.Cog):
     """Cog for handling various rate-based commands like 'cute', 'gay', 'iq', etc.'"""
 
     def __init__(self, bot):
         self.bot = bot
-        self.logger = setup_logger('twitch_bot.cogs.rate')  # Reuse the centralized logger
+        self.logger = setup_logger("twitch_bot.cogs.rate")  # Reuse the centralized logger
 
     def get_mentioned_user(self, ctx: commands.Context, mentioned_user: str = None):
         """Helper method to extract a mentioned user or default to the command author."""
@@ -88,7 +89,11 @@ class Rate(commands.Cog):
         """Returns a random IQ score and adds a comment based on the result."""
         user = self.get_mentioned_user(ctx, mentioned_user)
         iq = random.randint(0, 200)
-        iq_description = "thoughtless" if iq <= 50 else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
+        iq_description = (
+            "thoughtless"
+            if iq <= 50
+            else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
+        )
         response = f"{user} has {iq} IQ. {iq_description}"
         self.logger.info(f"IQ command result: {response}")
         await ctx.send(response)
@@ -102,7 +107,7 @@ class Rate(commands.Cog):
         self.logger.info(f"Sus command result: {response}")
         await ctx.send(response)
 
-    @commands.command(name='all')
+    @commands.command(name="all")
     async def all_command(self, ctx: commands.Context, *, mentioned_user: str = None):
         """Runs all rate commands for the user and sends each result as a separate message."""
         user = self.get_mentioned_user(ctx, mentioned_user)
@@ -137,7 +142,11 @@ class Rate(commands.Cog):
         messages.append(f"{user} is {horny_percentage}% horny right now. {'HORNY' if horny_percentage > 50 else 'Hmm'}")
 
         iq = random.randint(0, 200)
-        iq_description = "thoughtless" if iq <= 50 else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
+        iq_description = (
+            "thoughtless"
+            if iq <= 50
+            else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
+        )
         messages.append(f"{user} has {iq} IQ. {iq_description}")
 
         sus_percentage = random.randint(0, 100)
@@ -179,18 +188,16 @@ class Rate(commands.Cog):
             length_str = f"{length_inches}in"
 
         # Determine variations based on the result
-        cute_response = 'MenheraCute' if cute >= 50 else 'SadgeCry'
-        gay_response = 'Gayge' if gay_percentage > 50 else '📏'
-        horny_response = 'HORNY' if horny_percentage > 50 else 'despair'
-        sus_response = 'SUSSY' if sus_percentage > 50 else 'Hmm'
+        cute_response = "MenheraCute" if cute >= 50 else "SadgeCry"
+        gay_response = "Gayge" if gay_percentage > 50 else "📏"
+        horny_response = "HORNY" if horny_percentage > 50 else "despair"
+        sus_response = "SUSSY" if sus_percentage > 50 else "Hmm"
         iq_description = (
-            "thoughtless" if iq <= 50 else
-            "a slowpoke" if iq <= 80 else
-            "an NPC" if iq <= 115 else
-            "catNerd" if iq <= 199 else
-            "BrainGalaxy"
+            "thoughtless"
+            if iq <= 50
+            else "a slowpoke" if iq <= 80 else "an NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
         )
-        rate_response = 'CHUG' if rating > 5 else 'Hmm'
+        rate_response = "CHUG" if rating > 5 else "Hmm"
 
         # Create a coherent summary with variations
         response = (
@@ -217,6 +224,7 @@ class Rate(commands.Cog):
             except Exception as e:
                 self.logger.error(f"Error sending message: {e}", exc_info=True)
                 await ctx.send(f"{user}, an unexpected error occurred while sending the response.")
+
 
 def prepare(bot):
     bot.add_cog(Rate(bot))

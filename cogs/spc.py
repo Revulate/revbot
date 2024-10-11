@@ -10,24 +10,25 @@ from twitchio.ext import commands
 from rapidfuzz import process, fuzz  # For fuzzy search
 from dotenv import load_dotenv
 
+
 class Spc(commands.Cog):
     """Cog for handling SteamDB interactions, including fetching game data and retrieving player counts."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.logger = logging.getLogger('twitch_bot.cogs.spc')
+        self.logger = logging.getLogger("twitch_bot.cogs.spc")
         self.logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
-        formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
+        formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
         if not self.logger.handlers:
             self.logger.addHandler(handler)
 
-        self.steam_api_key = os.getenv('API_STEAM_KEY')
+        self.steam_api_key = os.getenv("API_STEAM_KEY")
         if not self.steam_api_key:
             self.logger.warning("API_STEAM_KEY environment variable not set. Some features may be limited.")
 
-        self.db_path = 'steam_game.db'
+        self.db_path = "steam_game.db"
         self.bot.loop.create_task(self._setup_database())
 
         # Initialize the HTTP session asynchronously
@@ -54,12 +55,14 @@ class Spc(commands.Cog):
         """Set up the Steam_Game table in the SQLite database."""
         try:
             async with aiosqlite.connect(self.db_path) as db:
-                await db.execute('''
+                await db.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS Steam_Game (
                         ID INTEGER PRIMARY KEY,
                         Name TEXT NOT NULL
                     )
-                ''')
+                """
+                )
                 await db.commit()
             self.logger.info("Steam_Game table is set up.")
         except Exception as e:
@@ -95,24 +98,24 @@ class Spc(commands.Cog):
             self.logger.error(f"Exception during Steam app list fetch: {e}", exc_info=True)
             return
 
-        apps = data.get('applist', {}).get('apps', [])
+        apps = data.get("applist", {}).get("apps", [])
         self.logger.info(f"Fetched {len(apps)} apps from Steam.")
 
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 for game in apps:
-                    app_id = game.get('appid')
-                    name = game.get('name')
+                    app_id = game.get("appid")
+                    name = game.get("name")
 
                     if not app_id or not name:
                         continue
 
                     try:
-                        async with db.execute('SELECT 1 FROM Steam_Game WHERE ID = ?', (app_id,)) as cursor:
+                        async with db.execute("SELECT 1 FROM Steam_Game WHERE ID = ?", (app_id,)) as cursor:
                             if await cursor.fetchone():
                                 continue  # Game already exists
 
-                        await db.execute('INSERT INTO Steam_Game (ID, Name) VALUES (?, ?)', (app_id, name))
+                        await db.execute("INSERT INTO Steam_Game (ID, Name) VALUES (?, ?)", (app_id, name))
                     except Exception as e:
                         self.logger.error(f"Error inserting game ID {app_id}: {e}", exc_info=True)
                 await db.commit()
@@ -120,7 +123,7 @@ class Spc(commands.Cog):
         except Exception as e:
             self.logger.error(f"Error updating the database: {e}", exc_info=True)
 
-    @commands.command(name='spc', aliases=['sgp'])
+    @commands.command(name="spc", aliases=["sgp"])
     async def steam_game_players(self, ctx: commands.Context, *args):
         """
         Searches for a Steam game and retrieves its current player count.
@@ -188,7 +191,7 @@ class Spc(commands.Cog):
 
         first_arg = args[0]
 
-        if first_arg.startswith('#'):
+        if first_arg.startswith("#"):
             # Channel specification
             channel_name = first_arg[1:].lower()
             args = args[1:]  # Remove channel from args
@@ -206,19 +209,19 @@ class Spc(commands.Cog):
 
             if args:
                 second_arg = args[0].lower()
-                if second_arg in ['true', '1', 'yes']:
+                if second_arg in ["true", "1", "yes"]:
                     skipReviews = True
                     args = args[1:]
                 # Remaining args are gameName
                 if args:
-                    gameName = ' '.join(args)
+                    gameName = " ".join(args)
         else:
             # First argument is gameName
-            gameName = ' '.join(args)
+            gameName = " ".join(args)
 
         # If gameName starts with '#', treat it as channel_name
-        if gameName and gameName.startswith('#'):
-            parts = gameName.split(' ', 1)
+        if gameName and gameName.startswith("#"):
+            parts = gameName.split(" ", 1)
             channel_name = parts[0][1:].lower()
             gameName = parts[1] if len(parts) > 1 else None
 
@@ -242,7 +245,9 @@ class Spc(commands.Cog):
                         self.logger.info(f"Message sent to #{channel_name} by {ctx.author.name}.")
                     except Exception as e:
                         self.logger.error(f"Error sending message to #{channel_name}: {e}", exc_info=True)
-                        await ctx.send(f"@{ctx.author.name}, an error occurred while sending the message to #{channel_name}.")
+                        await ctx.send(
+                            f"@{ctx.author.name}, an error occurred while sending the message to #{channel_name}."
+                        )
                 else:
                     await ctx.send(f"@{ctx.author.name}, could not find channel #{channel_name}.")
                     self.logger.error(f"Channel object for #{channel_name} not found.")
@@ -263,7 +268,9 @@ class Spc(commands.Cog):
         self.logger.info(f"Searching for game by name: {game_name}")
         try:
             async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute('SELECT ID, Name FROM Steam_Game WHERE Name LIKE ?', (f'%{game_name}%',)) as cursor:
+                async with db.execute(
+                    "SELECT ID, Name FROM Steam_Game WHERE Name LIKE ?", (f"%{game_name}%",)
+                ) as cursor:
                     games = await cursor.fetchall()
         except Exception as e:
             self.logger.error(f"Error during game search: {e}", exc_info=True)
@@ -273,11 +280,7 @@ class Spc(commands.Cog):
             return None
 
         game_names = [game[1] for game in games]
-        best_match = process.extractOne(
-            query=game_name,
-            choices=game_names,
-            scorer=fuzz.WRatio
-        )
+        best_match = process.extractOne(query=game_name, choices=game_names, scorer=fuzz.WRatio)
 
         if best_match and best_match[1] >= 80:  # Threshold can be adjusted
             matched_name = best_match[0]
@@ -290,16 +293,16 @@ class Spc(commands.Cog):
 
     async def get_current_player_count(self, app_id: int) -> int:
         """Retrieve the current number of players for a given Steam App ID."""
-        params = {
-            'appid': app_id
-        }
+        params = {"appid": app_id}
         try:
-            async with self.session.get("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", params=params, timeout=10) as response:
+            async with self.session.get(
+                "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", params=params, timeout=10
+            ) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch player count for App ID {app_id}: {response.status}")
                     return None
                 data = await response.json()
-                player_count = data.get('response', {}).get('player_count')
+                player_count = data.get("response", {}).get("player_count")
                 self.logger.debug(f"Player count for App ID {app_id}: {player_count}")
                 return player_count
         except Exception as e:
@@ -309,21 +312,17 @@ class Spc(commands.Cog):
     async def get_game_reviews(self, app_id: int) -> str:
         """Retrieve the review scores for a given Steam App ID."""
         url = f"https://store.steampowered.com/appreviews/{app_id}/"
-        params = {
-            'json': '1',
-            'filter': 'all',
-            'language': 'all'
-        }
+        params = {"json": "1", "filter": "all", "language": "all"}
         try:
             async with self.session.get(url, params=params, timeout=10) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch reviews for App ID {app_id}: {response.status}")
                     return "Could not fetch reviews data."
                 data = await response.json()
-                summary = data.get('query_summary', {})
-                total_reviews = summary.get('total_reviews', 0)
-                total_positive = summary.get('total_positive', 0)
-                review_score_desc = summary.get('review_score_desc', 'No Reviews')
+                summary = data.get("query_summary", {})
+                total_reviews = summary.get("total_reviews", 0)
+                total_positive = summary.get("total_positive", 0)
+                review_score_desc = summary.get("review_score_desc", "No Reviews")
 
                 if total_reviews > 0:
                     score_percentage = round((total_positive / total_reviews) * 100, 1)
@@ -336,27 +335,25 @@ class Spc(commands.Cog):
 
     async def get_game_details(self, app_id: int) -> dict:
         """Retrieve the details of a Steam game by App ID."""
-        params = {
-            'appids': app_id  # Correct parameter name
-        }
+        params = {"appids": app_id}  # Correct parameter name
         try:
-            async with self.session.get("https://store.steampowered.com/api/appdetails", params=params, timeout=10) as response:
+            async with self.session.get(
+                "https://store.steampowered.com/api/appdetails", params=params, timeout=10
+            ) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch game details for App ID {app_id}: {response.status}")
                     return None
                 data = await response.json()
-                game_data = data.get(str(app_id), {}).get('data')
+                game_data = data.get(str(app_id), {}).get("data")
                 if not game_data:
                     self.logger.error(f"No data found for App ID {app_id}.")
                     return None
-                developers = game_data.get('developers', [])
-                return {
-                    'name': game_data.get('name', 'Unknown'),
-                    'developers': developers
-                }
+                developers = game_data.get("developers", [])
+                return {"name": game_data.get("name", "Unknown"), "developers": developers}
         except Exception as e:
             self.logger.error(f"Exception during game details fetch: {e}", exc_info=True)
             return None
+
 
 def prepare(bot):
     bot.add_cog(Spc(bot))

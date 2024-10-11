@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 load_dotenv()
 
+
 class Preview(commands.Cog):
     """Cog for displaying the preview thumbnail and details of a specified Twitch stream."""
 
@@ -27,7 +28,7 @@ class Preview(commands.Cog):
 
         user = users[0]
         streams = await self.bot.fetch_streams(user_logins=[channel_name])
-        
+
         channel_info = {
             "id": user.id,
             "name": user.name,
@@ -36,18 +37,20 @@ class Preview(commands.Cog):
             "title": "Offline",
             "game_name": "N/A",
             "thumbnail_url": f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg",
-            "started_at": None
+            "started_at": None,
         }
 
         if streams:
             stream = streams[0]
-            channel_info.update({
-                "is_live": True,
-                "viewer_count": stream.viewer_count,
-                "title": stream.title,
-                "game_name": stream.game_name,
-                "started_at": stream.started_at
-            })
+            channel_info.update(
+                {
+                    "is_live": True,
+                    "viewer_count": stream.viewer_count,
+                    "title": stream.title,
+                    "game_name": stream.game_name,
+                    "started_at": stream.started_at,
+                }
+            )
 
         return channel_info
 
@@ -56,7 +59,7 @@ class Preview(commands.Cog):
         days, seconds = duration.days, duration.seconds
         hours, seconds = divmod(seconds, 3600)
         minutes, seconds = divmod(seconds, 60)
-        
+
         parts = []
         if days > 0:
             parts.append(f"{days}d")
@@ -66,7 +69,7 @@ class Preview(commands.Cog):
             parts.append(f"{minutes}m")
         if seconds > 0 or not parts:
             parts.append(f"{seconds}s")
-        
+
         return " ".join(parts)
 
     @commands.command(name="preview")
@@ -84,10 +87,12 @@ class Preview(commands.Cog):
             try:
                 self.bot.logger.debug(f"Getting info for channel '{channel_name}' (Attempt {attempt + 1})")
                 channel_info = await self.get_channel_info(channel_name)
-                
+
                 if not channel_info:
                     self.bot.logger.error(f"Invalid or missing channel information for '{channel_name}'.")
-                    await ctx.send(f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct.")
+                    await ctx.send(
+                        f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct."
+                    )
                     return
 
                 now = datetime.now(timezone.utc)
@@ -106,8 +111,7 @@ class Preview(commands.Cog):
                 else:
                     status = "OFFLINE"
                     response = (
-                        f"@{ctx.author.name}, Channel: https://twitch.tv/{channel_info['name']} | "
-                        f"Status: {status}"
+                        f"@{ctx.author.name}, Channel: https://twitch.tv/{channel_info['name']} | " f"Status: {status}"
                     )
 
                 await ctx.send(response)
@@ -118,7 +122,10 @@ class Preview(commands.Cog):
                 if attempt < retry_count - 1:
                     await sleep(2)  # Wait before retrying
                 else:
-                    await ctx.send(f"@{ctx.author.name}, an error occurred while processing your request. Please try again later.")
+                    await ctx.send(
+                        f"@{ctx.author.name}, an error occurred while processing your request. Please try again later."
+                    )
+
 
 def prepare(bot):
     bot.add_cog(Preview(bot))

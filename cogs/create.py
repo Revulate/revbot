@@ -6,14 +6,15 @@ from twitchio.ext import commands
 from openai import AsyncOpenAI
 from utils import split_message  # Import shared utilities
 
+
 class Create(commands.Cog):
     """Cog for handling the 'create' command for DALL-E image generation."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.logger = logging.getLogger('twitch_bot.cogs.create')
-        openai_api_key = os.getenv('OPENAI_API_KEY')
-        self.nuuls_api_key = os.getenv('NUULS_API_KEY')  # Nuuls API key for image hosting
+        self.logger = logging.getLogger("twitch_bot.cogs.create")
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.nuuls_api_key = os.getenv("NUULS_API_KEY")  # Nuuls API key for image hosting
 
         if not openai_api_key:
             self.logger.error("OPENAI_API_KEY is not set in the environment variables.")
@@ -31,14 +32,14 @@ class Create(commands.Cog):
         try:
             async with aiohttp.ClientSession() as session:
                 form = aiohttp.FormData()
-                form.add_field('file', file_data, filename=file_name, content_type='multipart/form-data')
+                form.add_field("file", file_data, filename=file_name, content_type="multipart/form-data")
 
                 async with session.post(f"{upload_endpoint}?api_key={self.nuuls_api_key}", data=form) as resp:
                     if resp.status != 200:
                         self.logger.error(f"Failed to upload file. Status: {resp.status}")
                         return ""
                     upload_response_text = await resp.text()
-                    hosted_url_match = re.search(r'(https?://\S+)', upload_response_text)
+                    hosted_url_match = re.search(r"(https?://\S+)", upload_response_text)
                     if hosted_url_match:
                         return hosted_url_match.group(1)
                     else:
@@ -91,7 +92,7 @@ class Create(commands.Cog):
             self.logger.error(f"OpenAI Image API error: {e}", exc_info=True)
             return []
 
-    @commands.command(name='create')
+    @commands.command(name="create")
     async def create_command(self, ctx: commands.Context, *, prompt: str = None):
         """Generates images using DALL-E based on user prompts."""
         if not prompt:
@@ -107,7 +108,7 @@ class Create(commands.Cog):
                 image_data = await self.download_image(url)
                 if image_data:
                     # Upload the downloaded image to i.nuuls
-                    hosted_url = await self.upload_file(image_data, 'image.png')
+                    hosted_url = await self.upload_file(image_data, "image.png")
                     if hosted_url:
                         await ctx.send(f"@{ctx.author.name}, here's your image: {hosted_url}")
                     else:
@@ -117,6 +118,7 @@ class Create(commands.Cog):
                     await ctx.send(f"@{ctx.author.name}, failed to download the image.")
         else:
             await ctx.send(f"@{ctx.author.name}, I'm unable to generate the image at this time.")
+
 
 def prepare(bot):
     bot.add_cog(Create(bot))

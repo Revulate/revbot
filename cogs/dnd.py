@@ -11,10 +11,10 @@ from twitchio import PartialChatter  # Correctly import PartialChatter
 from twitchio.ext import commands
 
 
-logger = logging.getLogger('twitch_bot.cogs.dnd')
+logger = logging.getLogger("twitch_bot.cogs.dnd")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
-formatter = logging.Formatter('[%(asctime)s] %(levelname)s:%(name)s: %(message)s')
+formatter = logging.Formatter("[%(asctime)s] %(levelname)s:%(name)s: %(message)s")
 handler.setFormatter(formatter)
 if not logger.handlers:
     logger.addHandler(handler)
@@ -25,7 +25,7 @@ class DnD(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db_path = 'twitch_bot.db'
+        self.db_path = "twitch_bot.db"
         self._setup_database()
         self.user_states = {}  # Dictionary to track user states
         logger.info("DnD cog initialized.")
@@ -39,7 +39,8 @@ class DnD(commands.Cog):
         conn = self.get_db_connection()
         cursor = conn.cursor()
         # Create game_users table
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS game_users (
                 user_id TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
@@ -57,9 +58,11 @@ class DnD(commands.Cog):
                 skills TEXT,  -- JSON array
                 gear TEXT     -- JSON array
             )
-        ''')
+        """
+        )
         # Create quests table (if needed)
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS quests (
                 quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 description TEXT NOT NULL,
@@ -67,84 +70,92 @@ class DnD(commands.Cog):
                 rewards TEXT,
                 requirements TEXT
             )
-        ''')
+        """
+        )
         # Create parties table (if needed)
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS parties (
                 party_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 member_ids TEXT NOT NULL,  -- JSON array of user_ids
                 status TEXT DEFAULT 'active'
             )
-        ''')
+        """
+        )
         conn.commit()
         conn.close()
         logger.info("DnD database setup completed.")
 
     def randomize_stats(self, character_class: str) -> dict:
         """Randomize stats based on character class."""
-        if character_class.lower() == 'mage':
+        if character_class.lower() == "mage":
             return {
-                'strength': random.randint(6, 12),
-                'intelligence': random.randint(12, 18),
-                'dexterity': random.randint(8, 14),
-                'constitution': random.randint(8, 14),
-                'wisdom': random.randint(10, 16),
-                'charisma': random.randint(8, 14),
+                "strength": random.randint(6, 12),
+                "intelligence": random.randint(12, 18),
+                "dexterity": random.randint(8, 14),
+                "constitution": random.randint(8, 14),
+                "wisdom": random.randint(10, 16),
+                "charisma": random.randint(8, 14),
             }
-        elif character_class.lower() == 'warrior':
+        elif character_class.lower() == "warrior":
             return {
-                'strength': random.randint(12, 18),
-                'intelligence': random.randint(6, 12),
-                'dexterity': random.randint(10, 16),
-                'constitution': random.randint(12, 18),
-                'wisdom': random.randint(8, 14),
-                'charisma': random.randint(8, 14),
+                "strength": random.randint(12, 18),
+                "intelligence": random.randint(6, 12),
+                "dexterity": random.randint(10, 16),
+                "constitution": random.randint(12, 18),
+                "wisdom": random.randint(8, 14),
+                "charisma": random.randint(8, 14),
             }
-        elif character_class.lower() == 'rogue':
+        elif character_class.lower() == "rogue":
             return {
-                'strength': random.randint(8, 14),
-                'intelligence': random.randint(10, 16),
-                'dexterity': random.randint(12, 18),
-                'constitution': random.randint(8, 14),
-                'wisdom': random.randint(8, 14),
-                'charisma': random.randint(10, 16),
+                "strength": random.randint(8, 14),
+                "intelligence": random.randint(10, 16),
+                "dexterity": random.randint(12, 18),
+                "constitution": random.randint(8, 14),
+                "wisdom": random.randint(8, 14),
+                "charisma": random.randint(10, 16),
             }
         else:
             # Default stats if class is unrecognized
             return {
-                'strength': random.randint(8, 16),
-                'intelligence': random.randint(8, 16),
-                'dexterity': random.randint(8, 16),
-                'constitution': random.randint(8, 16),
-                'wisdom': random.randint(8, 16),
-                'charisma': random.randint(8, 16),
+                "strength": random.randint(8, 16),
+                "intelligence": random.randint(8, 16),
+                "dexterity": random.randint(8, 16),
+                "constitution": random.randint(8, 16),
+                "wisdom": random.randint(8, 16),
+                "charisma": random.randint(8, 16),
             }
 
-    def create_character_entry(self, user_id: str, username: str, race: str, character_class: str, background: str, stats: dict):
+    def create_character_entry(
+        self, user_id: str, username: str, race: str, character_class: str, background: str, stats: dict
+    ):
         """Create a new character entry in the database."""
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO game_users (
                 user_id, username, race, character_class, background,
                 strength, intelligence, dexterity, constitution, wisdom, charisma,
                 skills, gear
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            user_id,
-            username,
-            race,
-            character_class,
-            background,
-            stats['strength'],
-            stats['intelligence'],
-            stats['dexterity'],
-            stats['constitution'],
-            stats['wisdom'],
-            stats['charisma'],
-            json.dumps([]),  # skills
-            json.dumps([])   # gear
-        ))
+        """,
+            (
+                user_id,
+                username,
+                race,
+                character_class,
+                background,
+                stats["strength"],
+                stats["intelligence"],
+                stats["dexterity"],
+                stats["constitution"],
+                stats["wisdom"],
+                stats["charisma"],
+                json.dumps([]),  # skills
+                json.dumps([]),  # gear
+            ),
+        )
         conn.commit()
         conn.close()
         logger.info(f"Character created for user {username} (ID: {user_id}).")
@@ -153,7 +164,7 @@ class DnD(commands.Cog):
         """Retrieve a user's character from the database."""
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM game_users WHERE user_id = ?', (user_id,))
+        cursor.execute("SELECT * FROM game_users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
         conn.close()
         if row:
@@ -165,7 +176,7 @@ class DnD(commands.Cog):
         """Check if a user is already in a party."""
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM parties WHERE member_ids LIKE ?', (f'%"{user_id}"%',))
+        cursor.execute("SELECT * FROM parties WHERE member_ids LIKE ?", (f'%"{user_id}"%',))
         row = cursor.fetchone()
         conn.close()
         return bool(row)
@@ -174,13 +185,13 @@ class DnD(commands.Cog):
         """Retrieve the party a user is in."""
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM parties WHERE member_ids LIKE ?', (f'%"{user_id}"%',))
+        cursor.execute("SELECT * FROM parties WHERE member_ids LIKE ?", (f'%"{user_id}"%',))
         row = cursor.fetchone()
         conn.close()
         if row:
             columns = [column[0] for column in cursor.description]
             party = dict(zip(columns, row))
-            party['member_ids'] = json.loads(party['member_ids'])
+            party["member_ids"] = json.loads(party["member_ids"])
             return party
         return None
 
@@ -201,7 +212,7 @@ class DnD(commands.Cog):
 
     # --- Commands ---
 
-    @commands.command(name='create')
+    @commands.command(name="create")
     async def create(self, ctx: commands.Context):
         """Initiate the character creation process."""
         user_id = str(ctx.author.id)
@@ -214,27 +225,33 @@ class DnD(commands.Cog):
 
         # Check if user is already in the process of creating a character
         if user_id in self.user_states:
-            await ctx.send(f"@{username}, you're already in the process of creating a character. Please complete the current process before starting a new one.")
+            await ctx.send(
+                f"@{username}, you're already in the process of creating a character. Please complete the current process before starting a new one."
+            )
             return
 
         # Initialize user state
-        self.user_states[user_id] = {'step': 'race'}
-        await ctx.send(f"@{username}, welcome to character creation! Please choose your race using `#create_race <Race>`. Available races: Human, Elf, Dwarf, Orc.")
+        self.user_states[user_id] = {"step": "race"}
+        await ctx.send(
+            f"@{username}, welcome to character creation! Please choose your race using `#create_race <Race>`. Available races: Human, Elf, Dwarf, Orc."
+        )
 
-    @commands.command(name='create_race')
+    @commands.command(name="create_race")
     async def create_race(self, ctx: commands.Context, race: str = None):
         """Choose race for character."""
         user_id = str(ctx.author.id)
         username = ctx.author.name
 
         # Check if user is in the creation process
-        if user_id not in self.user_states or self.user_states[user_id].get('step') != 'race':
+        if user_id not in self.user_states or self.user_states[user_id].get("step") != "race":
             await ctx.send(f"@{username}, to start creating a character, use `#create`.")
             return
 
-        races = ['Human', 'Elf', 'Dwarf', 'Orc']
+        races = ["Human", "Elf", "Dwarf", "Orc"]
         if not race:
-            await ctx.send(f"@{username}, please specify a race. Usage: `#create_race <Race>`. Available races: Human, Elf, Dwarf, Orc.")
+            await ctx.send(
+                f"@{username}, please specify a race. Usage: `#create_race <Race>`. Available races: Human, Elf, Dwarf, Orc."
+            )
             return
 
         if race.capitalize() not in races:
@@ -242,24 +259,28 @@ class DnD(commands.Cog):
             return
 
         # Update state
-        self.user_states[user_id]['race'] = race.capitalize()
-        self.user_states[user_id]['step'] = 'class'
-        await ctx.send(f"@{username}, you chose **{race.capitalize()}**. Now, choose your class using `#create_class <Class>`. Available classes: Mage, Warrior, Rogue.")
+        self.user_states[user_id]["race"] = race.capitalize()
+        self.user_states[user_id]["step"] = "class"
+        await ctx.send(
+            f"@{username}, you chose **{race.capitalize()}**. Now, choose your class using `#create_class <Class>`. Available classes: Mage, Warrior, Rogue."
+        )
 
-    @commands.command(name='create_class')
+    @commands.command(name="create_class")
     async def create_class(self, ctx: commands.Context, character_class: str = None):
         """Choose class for character."""
         user_id = str(ctx.author.id)
         username = ctx.author.name
 
         # Check if user is in the creation process
-        if user_id not in self.user_states or self.user_states[user_id].get('step') != 'class':
+        if user_id not in self.user_states or self.user_states[user_id].get("step") != "class":
             await ctx.send(f"@{username}, to create a class, use `#create` first.")
             return
 
-        classes = ['Mage', 'Warrior', 'Rogue']
+        classes = ["Mage", "Warrior", "Rogue"]
         if not character_class:
-            await ctx.send(f"@{username}, please specify a class. Usage: `#create_class <Class>`. Available classes: Mage, Warrior, Rogue.")
+            await ctx.send(
+                f"@{username}, please specify a class. Usage: `#create_class <Class>`. Available classes: Mage, Warrior, Rogue."
+            )
             return
 
         if character_class.capitalize() not in classes:
@@ -267,24 +288,28 @@ class DnD(commands.Cog):
             return
 
         # Update state
-        self.user_states[user_id]['class'] = character_class.capitalize()
-        self.user_states[user_id]['step'] = 'background'
-        await ctx.send(f"@{username}, you chose **{character_class.capitalize()}**. Now, choose your background using `#create_background <Background>`. Available backgrounds: Noble, Outlander, Scholar.")
+        self.user_states[user_id]["class"] = character_class.capitalize()
+        self.user_states[user_id]["step"] = "background"
+        await ctx.send(
+            f"@{username}, you chose **{character_class.capitalize()}**. Now, choose your background using `#create_background <Background>`. Available backgrounds: Noble, Outlander, Scholar."
+        )
 
-    @commands.command(name='create_background')
+    @commands.command(name="create_background")
     async def create_background(self, ctx: commands.Context, background: str = None):
         """Choose background for character."""
         user_id = str(ctx.author.id)
         username = ctx.author.name
 
         # Check if user is in the creation process
-        if user_id not in self.user_states or self.user_states[user_id].get('step') != 'background':
+        if user_id not in self.user_states or self.user_states[user_id].get("step") != "background":
             await ctx.send(f"@{username}, to create a background, use `#create` first.")
             return
 
-        backgrounds = ['Noble', 'Outlander', 'Scholar']
+        backgrounds = ["Noble", "Outlander", "Scholar"]
         if not background:
-            await ctx.send(f"@{username}, please specify a background. Usage: `#create_background <Background>`. Available backgrounds: Noble, Outlander, Scholar.")
+            await ctx.send(
+                f"@{username}, please specify a background. Usage: `#create_background <Background>`. Available backgrounds: Noble, Outlander, Scholar."
+            )
             return
 
         if background.capitalize() not in backgrounds:
@@ -292,13 +317,13 @@ class DnD(commands.Cog):
             return
 
         # Update state
-        self.user_states[user_id]['background'] = background.capitalize()
-        self.user_states[user_id]['step'] = 'finalize'
+        self.user_states[user_id]["background"] = background.capitalize()
+        self.user_states[user_id]["step"] = "finalize"
 
         # Finalize Character Creation
-        race = self.user_states[user_id]['race']
-        character_class = self.user_states[user_id]['class']
-        background = self.user_states[user_id]['background']
+        race = self.user_states[user_id]["race"]
+        character_class = self.user_states[user_id]["class"]
+        background = self.user_states[user_id]["background"]
         stats = self.randomize_stats(character_class)
 
         # Create and save the new character
@@ -315,7 +340,7 @@ class DnD(commands.Cog):
         )
         await ctx.send(f"{username} has created a character! {stats_display}")
 
-    @commands.command(name='stats', aliases=['profile'])
+    @commands.command(name="stats", aliases=["profile"])
     async def view_stats(self, ctx: commands.Context):
         """View your current character's stats."""
         user_id = str(ctx.author.id)
@@ -336,7 +361,7 @@ class DnD(commands.Cog):
         )
         await ctx.send(f"{username}'s Character Stats:\n{stats_display}")
 
-    @commands.command(name='levelup')
+    @commands.command(name="levelup")
     async def level_up(self, ctx: commands.Context, points: int = 1):
         """Allocate stat points upon leveling up."""
         user_id = str(ctx.author.id)
@@ -347,8 +372,8 @@ class DnD(commands.Cog):
             await ctx.send(f"@{username}, you don't have a character yet. Use `#create` to create one.")
             return
 
-        required_xp = character['level'] * 100  # Example XP requirement
-        if character['experience'] < required_xp:
+        required_xp = character["level"] * 100  # Example XP requirement
+        if character["experience"] < required_xp:
             await ctx.send(f"@{username}, you need {required_xp - character['experience']} more XP to level up.")
             return
 
@@ -357,17 +382,17 @@ class DnD(commands.Cog):
             return
 
         # Deduct XP
-        new_xp = character['experience'] - required_xp
-        new_level = character['level'] + 1
+        new_xp = character["experience"] - required_xp
+        new_level = character["level"] + 1
 
         # Allocate points (for simplicity, randomly assign to stats)
         stats = {
-            'strength': character['strength'],
-            'intelligence': character['intelligence'],
-            'dexterity': character['dexterity'],
-            'constitution': character['constitution'],
-            'wisdom': character['wisdom'],
-            'charisma': character['charisma'],
+            "strength": character["strength"],
+            "intelligence": character["intelligence"],
+            "dexterity": character["dexterity"],
+            "constitution": character["constitution"],
+            "wisdom": character["wisdom"],
+            "charisma": character["charisma"],
         }
 
         for _ in range(points):
@@ -377,33 +402,40 @@ class DnD(commands.Cog):
         # Update the character in the database
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             UPDATE game_users
             SET level = ?, experience = ?, strength = ?, intelligence = ?, dexterity = ?, constitution = ?, wisdom = ?, charisma = ?
             WHERE user_id = ?
-        ''', (
-            new_level,
-            new_xp,
-            stats['strength'],
-            stats['intelligence'],
-            stats['dexterity'],
-            stats['constitution'],
-            stats['wisdom'],
-            stats['charisma'],
-            user_id
-        ))
+        """,
+            (
+                new_level,
+                new_xp,
+                stats["strength"],
+                stats["intelligence"],
+                stats["dexterity"],
+                stats["constitution"],
+                stats["wisdom"],
+                stats["charisma"],
+                user_id,
+            ),
+        )
         conn.commit()
         conn.close()
 
-        await ctx.send(f"@{username} has leveled up to **Level {new_level}**! Your new stats are:\n"
-                       f"STR {stats['strength']}, INT {stats['intelligence']}, DEX {stats['dexterity']}, "
-                       f"CON {stats['constitution']}, WIS {stats['wisdom']}, CHA {stats['charisma']} 🎉")
+        await ctx.send(
+            f"@{username} has leveled up to **Level {new_level}**! Your new stats are:\n"
+            f"STR {stats['strength']}, INT {stats['intelligence']}, DEX {stats['dexterity']}, "
+            f"CON {stats['constitution']}, WIS {stats['wisdom']}, CHA {stats['charisma']} 🎉"
+        )
 
-    @commands.command(name='skillcheck')
+    @commands.command(name="skillcheck")
     async def skill_check(self, ctx: commands.Context, skill: str = None, difficulty: int = None):
         """Perform a skill check."""
         if not skill or difficulty is None:
-            await ctx.send(f"@{ctx.author.name}, please provide both a skill and a difficulty. Usage: `#skillcheck <skill> <difficulty>`.")
+            await ctx.send(
+                f"@{ctx.author.name}, please provide both a skill and a difficulty. Usage: `#skillcheck <skill> <difficulty>`."
+            )
             return
 
         user_id = str(ctx.author.id)
@@ -416,11 +448,11 @@ class DnD(commands.Cog):
 
         # Define skill to stat mapping
         skill_stat_map = {
-            'arcana': 'intelligence',
-            'stealth': 'dexterity',
-            'athletics': 'strength',
-            'perception': 'wisdom',
-            'charisma': 'charisma',
+            "arcana": "intelligence",
+            "stealth": "dexterity",
+            "athletics": "strength",
+            "perception": "wisdom",
+            "charisma": "charisma",
             # Add more skills as needed
         }
 
@@ -440,9 +472,11 @@ class DnD(commands.Cog):
 
         emoji = "🎉" if success else "😞"
 
-        await ctx.send(f"@{username} performed a **{skill}** check! (Roll: {roll} + {relevant_stat.upper()}: {stat_value // 2} = {total} vs {difficulty}) - **{result.upper()}** {emoji}")
+        await ctx.send(
+            f"@{username} performed a **{skill}** check! (Roll: {roll} + {relevant_stat.upper()}: {stat_value // 2} = {total} vs {difficulty}) - **{result.upper()}** {emoji}"
+        )
 
-    @commands.command(name='quest')
+    @commands.command(name="quest")
     async def start_quest(self, ctx: commands.Context):
         """Start a new quest."""
         user_id = str(ctx.author.id)
@@ -454,21 +488,24 @@ class DnD(commands.Cog):
             return
 
         # Generate a quest based on character level
-        level = character['level']
+        level = character["level"]
         quest = self.generate_quest(level)
 
         # Save the quest to the database (optional for tracking)
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO quests (description, difficulty, rewards, requirements)
             VALUES (?, ?, ?, ?)
-        ''', (
-            quest['description'],
-            quest['difficulty'],
-            json.dumps(quest['rewards']),
-            json.dumps(quest.get('requirements', {}))
-        ))
+        """,
+            (
+                quest["description"],
+                quest["difficulty"],
+                json.dumps(quest["rewards"]),
+                json.dumps(quest.get("requirements", {})),
+            ),
+        )
         quest_id = cursor.lastrowid
         conn.commit()
         conn.close()
@@ -481,39 +518,39 @@ class DnD(commands.Cog):
         # Define quest templates
         quest_templates = [
             {
-                'description': 'Retrieve the ancient tome from the haunted library.',
-                'difficulty': 15,
-                'required_skill': 'arcana',
-                'rewards': {'experience': 150, 'items': ['Ancient Tome']}
+                "description": "Retrieve the ancient tome from the haunted library.",
+                "difficulty": 15,
+                "required_skill": "arcana",
+                "rewards": {"experience": 150, "items": ["Ancient Tome"]},
             },
             {
-                'description': 'Defeat the shadow beast terrorizing the village.',
-                'difficulty': 18,
-                'required_skill': 'athletics',
-                'rewards': {'experience': 200, 'items': ['Shadow Dagger']}
+                "description": "Defeat the shadow beast terrorizing the village.",
+                "difficulty": 18,
+                "required_skill": "athletics",
+                "rewards": {"experience": 200, "items": ["Shadow Dagger"]},
             },
             {
-                'description': 'Explore the forgotten depths of the dark dungeon.',
-                'difficulty': 25,
-                'required_skill': 'perception',
-                'rewards': {'experience': 300, 'items': ['Enchanted Armor']}
+                "description": "Explore the forgotten depths of the dark dungeon.",
+                "difficulty": 25,
+                "required_skill": "perception",
+                "rewards": {"experience": 300, "items": ["Enchanted Armor"]},
             },
             {
-                'description': 'Secure the borders against the invading orc horde.',
-                'difficulty': 12,
-                'required_skill': 'stealth',
-                'rewards': {'experience': 100, 'items': ['Stealth Cloak']}
+                "description": "Secure the borders against the invading orc horde.",
+                "difficulty": 12,
+                "required_skill": "stealth",
+                "rewards": {"experience": 100, "items": ["Stealth Cloak"]},
             },
             # Add more templates as needed
         ]
 
         # Select a quest based on level
         if level < 5:
-            available_quests = [q for q in quest_templates if q['difficulty'] <= 15]
+            available_quests = [q for q in quest_templates if q["difficulty"] <= 15]
         elif level < 10:
-            available_quests = [q for q in quest_templates if 15 < q['difficulty'] <= 20]
+            available_quests = [q for q in quest_templates if 15 < q["difficulty"] <= 20]
         else:
-            available_quests = [q for q in quest_templates if q['difficulty'] > 20]
+            available_quests = [q for q in quest_templates if q["difficulty"] > 20]
 
         if not available_quests:
             available_quests = quest_templates  # Fallback
@@ -521,7 +558,7 @@ class DnD(commands.Cog):
         quest = random.choice(available_quests)
         return quest
 
-    @commands.command(name='attack')
+    @commands.command(name="attack")
     async def attack_enemy(self, ctx: commands.Context, enemy: str = None):
         """Attack an enemy."""
         if not enemy:
@@ -538,9 +575,9 @@ class DnD(commands.Cog):
 
         # Simplified enemy stats (could be expanded or fetched from a database)
         enemies = {
-            'goblin': {'strength': 8, 'health': 20},
-            'troll': {'strength': 15, 'health': 50},
-            'dragon': {'strength': 25, 'health': 200},
+            "goblin": {"strength": 8, "health": 20},
+            "troll": {"strength": 15, "health": 50},
+            "dragon": {"strength": 25, "health": 200},
         }
 
         enemy_key = enemy.lower()
@@ -549,22 +586,26 @@ class DnD(commands.Cog):
             return
 
         enemy_stats = enemies[enemy_key]
-        enemy_health = enemy_stats['health']
+        enemy_health = enemy_stats["health"]
 
         # Player attacks enemy
-        player_roll = random.randint(1, 20) + (character['strength'] // 2)
-        enemy_roll = random.randint(1, 20) + (enemy_stats['strength'] // 2)
+        player_roll = random.randint(1, 20) + (character["strength"] // 2)
+        enemy_roll = random.randint(1, 20) + (enemy_stats["strength"] // 2)
 
         if player_roll > enemy_roll:
-            damage = character['strength'] // 2
+            damage = character["strength"] // 2
             enemy_health -= damage
-            enemies[enemy_key]['health'] = enemy_health  # Update for this session
+            enemies[enemy_key]["health"] = enemy_health  # Update for this session
             if enemy_health > 0:
-                await ctx.send(f"@{username} attacks {enemy} for {damage} damage! {enemy.capitalize()}'s health is now {enemy_health}. 🗡️")
+                await ctx.send(
+                    f"@{username} attacks {enemy} for {damage} damage! {enemy.capitalize()}'s health is now {enemy_health}. 🗡️"
+                )
             else:
-                await ctx.send(f"@{username} has defeated {enemy}! 🎉 You gain 100 XP and find a **{random.choice(['Gold Coin', 'Healing Potion'])}**.")
+                await ctx.send(
+                    f"@{username} has defeated {enemy}! 🎉 You gain 100 XP and find a **{random.choice(['Gold Coin', 'Healing Potion'])}**."
+                )
                 # Grant XP and items
-                self.update_user_after_combat(user_id, xp=100, item=random.choice(['Gold Coin', 'Healing Potion']))
+                self.update_user_after_combat(user_id, xp=100, item=random.choice(["Gold Coin", "Healing Potion"]))
         else:
             await ctx.send(f"@{username}'s attack missed {enemy}! 😞")
 
@@ -573,30 +614,36 @@ class DnD(commands.Cog):
         conn = self.get_db_connection()
         cursor = conn.cursor()
         # Update XP
-        cursor.execute('''
+        cursor.execute(
+            """
             UPDATE game_users
             SET experience = experience + ?
             WHERE user_id = ?
-        ''', (xp, user_id))
+        """,
+            (xp, user_id),
+        )
 
         # Add item to gear if provided
         if item:
-            cursor.execute('SELECT gear FROM game_users WHERE user_id = ?', (user_id,))
+            cursor.execute("SELECT gear FROM game_users WHERE user_id = ?", (user_id,))
             row = cursor.fetchone()
             if row:
                 gear = json.loads(row[0]) if row[0] else []
                 gear.append(item)
-                cursor.execute('''
+                cursor.execute(
+                    """
                     UPDATE game_users
                     SET gear = ?
                     WHERE user_id = ?
-                ''', (json.dumps(gear), user_id))
+                """,
+                    (json.dumps(gear), user_id),
+                )
 
         conn.commit()
         conn.close()
         logger.info(f"User ID {user_id} gained {xp} XP and obtained item: {item}.")
 
-    @commands.command(name='duel')
+    @commands.command(name="duel")
     async def duel_opponent(self, ctx: commands.Context, opponent: str = None):
         """Challenge another player to a duel."""
         if not opponent:
@@ -631,12 +678,14 @@ class DnD(commands.Cog):
             return
 
         # Initiate duel
-        await ctx.send(f"@{challenger_name} has challenged @{opponent_name} to a duel! @{opponent_name}, respond with `#acceptduel` to accept.")
+        await ctx.send(
+            f"@{challenger_name} has challenged @{opponent_name} to a duel! @{opponent_name}, respond with `#acceptduel` to accept."
+        )
 
         # Track the duel request
         self.duel_requests[(challenger_id, opponent_id)] = True
 
-    @commands.command(name='acceptduel')
+    @commands.command(name="acceptduel")
     async def accept_duel(self, ctx: commands.Context):
         """Accept a duel challenge."""
         user_id = str(ctx.author.id)
@@ -664,8 +713,8 @@ class DnD(commands.Cog):
         challenger_character = self.get_user_character(challenger_id)
         opponent_character = self.get_user_character(opponent_id)
 
-        challenger_roll = random.randint(1, 20) + (challenger_character['strength'] // 2)
-        opponent_roll = random.randint(1, 20) + (opponent_character['strength'] // 2)
+        challenger_roll = random.randint(1, 20) + (challenger_character["strength"] // 2)
+        opponent_roll = random.randint(1, 20) + (opponent_character["strength"] // 2)
 
         if challenger_roll > opponent_roll:
             await ctx.send(f"@{challenger_name} has won the duel against @{opponent_name}! 🎉")
@@ -678,7 +727,7 @@ class DnD(commands.Cog):
         else:
             await ctx.send(f"The duel between @{challenger_name} and @{opponent_name} ended in a tie! 🤝")
 
-    @commands.command(name='party')
+    @commands.command(name="party")
     async def manage_party(self, ctx: commands.Context, action: str = None, user: str = None):
         """Manage parties: create, invite, status."""
         user_id = str(ctx.author.id)
@@ -688,7 +737,7 @@ class DnD(commands.Cog):
             await ctx.send(f"@{username}, please specify an action: create, invite, status.")
             return
 
-        if action.lower() == 'create':
+        if action.lower() == "create":
             # Check if user is already in a party
             if self.is_user_in_party(user_id):
                 await ctx.send(f"@{username}, you are already in a party.")
@@ -697,17 +746,20 @@ class DnD(commands.Cog):
             # Create a new party with the user as the first member
             conn = self.get_db_connection()
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO parties (member_ids, status)
                 VALUES (?, ?)
-            ''', (json.dumps([user_id]), 'active'))
+            """,
+                (json.dumps([user_id]), "active"),
+            )
             party_id = cursor.lastrowid
             conn.commit()
             conn.close()
 
             await ctx.send(f"@{username} has created a new party! 🎉 Use `#party invite @user` to invite others.")
 
-        elif action.lower() == 'invite':
+        elif action.lower() == "invite":
             if not user:
                 await ctx.send(f"@{username}, please specify a user to invite. Usage: `#party invite @user`")
                 return
@@ -733,34 +785,37 @@ class DnD(commands.Cog):
                 return
 
             # Add invitee to the party
-            party['member_ids'].append(invitee_id)
+            party["member_ids"].append(invitee_id)
             conn = self.get_db_connection()
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE parties
                 SET member_ids = ?
                 WHERE party_id = ?
-            ''', (json.dumps(party['member_ids']), party['party_id']))
+            """,
+                (json.dumps(party["member_ids"]), party["party_id"]),
+            )
             conn.commit()
             conn.close()
 
             await ctx.send(f"@{username} has invited @{invitee_name} to the party! 🎉")
 
-        elif action.lower() == 'status':
+        elif action.lower() == "status":
             party = self.get_user_party(user_id)
             if not party:
                 await ctx.send(f"@{username}, you are not in a party.")
                 return
 
-            member_ids = party['member_ids']
+            member_ids = party["member_ids"]
             member_names = await self.get_usernames(member_ids)
-            members_display = ', '.join(member_names)
+            members_display = ", ".join(member_names)
             await ctx.send(f"@{username}, your party members: {members_display}")
 
         else:
             await ctx.send(f"@{username}, unknown party action '{action}'. Available actions: create, invite, status.")
 
-    @commands.command(name='inventory')
+    @commands.command(name="inventory")
     async def view_inventory(self, ctx: commands.Context):
         """View your inventory of items."""
         user_id = str(ctx.author.id)
@@ -771,11 +826,11 @@ class DnD(commands.Cog):
             await ctx.send(f"@{username}, you don't have a character yet. Use `#create` to create one.")
             return
 
-        gear = json.loads(character['gear']) if character['gear'] else []
+        gear = json.loads(character["gear"]) if character["gear"] else []
         if gear:
-            gear_display = ', '.join(gear)
+            gear_display = ", ".join(gear)
         else:
-            gear_display = 'None'
+            gear_display = "None"
 
         await ctx.send(f"@{username}'s Inventory:\n**Gear:** {gear_display}")
 
@@ -794,7 +849,7 @@ class DnD(commands.Cog):
         :return: The PartialChatter object or None.
         """
         try:
-            if user_identifier.startswith('@'):
+            if user_identifier.startswith("@"):
                 user_identifier = user_identifier[1:]
             users = await self.bot.fetch_users(names=[user_identifier])
             if users:

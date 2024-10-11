@@ -10,7 +10,8 @@ from twitchio import PartialUser, Channel
 from typing import List, Optional, Tuple
 import asyncio
 
-logger = logging.getLogger('twitch_bot.utils')
+logger = logging.getLogger("twitch_bot.utils")
+
 
 def split_message(message: str, max_length: int = 500) -> List[str]:
     """
@@ -27,8 +28,9 @@ def split_message(message: str, max_length: int = 500) -> List[str]:
     if len(message) <= max_length:
         return [message]
 
-    sentences = re.findall(r'[^.!?]+[.!?]?', message)
+    sentences = re.findall(r"[^.!?]+[.!?]?", message)
     return _chunk_sentences(sentences, max_length)
+
 
 def _chunk_sentences(sentences: List[str], max_length: int) -> List[str]:
     """
@@ -41,22 +43,23 @@ def _chunk_sentences(sentences: List[str], max_length: int) -> List[str]:
     Returns:
         List[str]: A list of message chunks.
     """
-    messages, current_chunk = [], ''
+    messages, current_chunk = [], ""
 
     for sentence in sentences:
         sentence = sentence.strip()
         if len(current_chunk) + len(sentence) + 1 > max_length:
             if current_chunk:
                 messages.append(current_chunk)
-            current_chunk = sentence if len(sentence) <= max_length else ''
+            current_chunk = sentence if len(sentence) <= max_length else ""
             if len(sentence) > max_length:
                 messages.extend(_split_long_sentence(sentence, max_length))
         else:
-            current_chunk += (' ' + sentence) if current_chunk else sentence
+            current_chunk += (" " + sentence) if current_chunk else sentence
 
     if current_chunk:
         messages.append(current_chunk)
     return messages
+
 
 def _split_long_sentence(sentence: str, max_length: int) -> List[str]:
     """
@@ -70,18 +73,19 @@ def _split_long_sentence(sentence: str, max_length: int) -> List[str]:
         List[str]: A list of smaller sentence chunks.
     """
     words = sentence.split()
-    sub_chunks, current_chunk = [], ''
+    sub_chunks, current_chunk = [], ""
 
     for word in words:
         if len(current_chunk) + len(word) + 1 > max_length:
             sub_chunks.append(current_chunk)
             current_chunk = word
         else:
-            current_chunk += (' ' + word) if current_chunk else word
+            current_chunk += (" " + word) if current_chunk else word
 
     if current_chunk:
         sub_chunks.append(current_chunk)
     return sub_chunks
+
 
 def remove_duplicate_sentences(text: str) -> str:
     """
@@ -93,7 +97,7 @@ def remove_duplicate_sentences(text: str) -> str:
     Returns:
         str: Text with duplicate sentences removed.
     """
-    sentences = re.split(r'(?<=[.!?]) +', text)
+    sentences = re.split(r"(?<=[.!?]) +", text)
     seen, unique_sentences = set(), []
 
     for sentence in sentences:
@@ -102,13 +106,15 @@ def remove_duplicate_sentences(text: str) -> str:
             unique_sentences.append(sentence.strip())
             seen.add(normalized)
 
-    return ' '.join(unique_sentences)
+    return " ".join(unique_sentences)
+
 
 class CustomContext(commands.Context):
     """
     Custom Context class to override the send method for message splitting
     and rate limiting.
     """
+
     async def send(self, content: str = None, **kwargs):
         """
         Overrides the default send method to handle message chunking and rate limiting.
@@ -123,6 +129,7 @@ class CustomContext(commands.Context):
                 await super().send(chunk, **kwargs)
                 await asyncio.sleep(1)  # Rate limit
 
+
 async def fetch_user(bot: commands.Bot, user_identifier: str) -> Optional[PartialUser]:
     """
     Fetches a user by name or ID.
@@ -135,12 +142,17 @@ async def fetch_user(bot: commands.Bot, user_identifier: str) -> Optional[Partia
         Optional[PartialUser]: The user object if found, else None.
     """
     try:
-        user_identifier = user_identifier.lstrip('@')
-        users = await bot.fetch_users(ids=[user_identifier]) if user_identifier.isdigit() else await bot.fetch_users(names=[user_identifier])
+        user_identifier = user_identifier.lstrip("@")
+        users = (
+            await bot.fetch_users(ids=[user_identifier])
+            if user_identifier.isdigit()
+            else await bot.fetch_users(names=[user_identifier])
+        )
         return users[0] if users else None
     except Exception as e:
         logger.error(f"Error fetching user '{user_identifier}': {e}")
         return None
+
 
 def get_channel(bot: commands.Bot, channel_name: str) -> Optional[Channel]:
     """
@@ -158,6 +170,7 @@ def get_channel(bot: commands.Bot, channel_name: str) -> Optional[Channel]:
         logger.warning(f"Channel '{channel_name}' not found in bot's connected channels.")
     return channel
 
+
 def expand_time_units(time_str: str) -> str:
     """
     Inserts spaces between numbers and letters if needed.
@@ -168,7 +181,8 @@ def expand_time_units(time_str: str) -> str:
     Returns:
         str: The time string with spaces inserted.
     """
-    return re.sub(r'(\d)([a-zA-Z])', r'\1 \2', time_str)
+    return re.sub(r"(\d)([a-zA-Z])", r"\1 \2", time_str)
+
 
 def parse_time_string(time_str: str) -> Optional[timedelta]:
     """
@@ -180,25 +194,35 @@ def parse_time_string(time_str: str) -> Optional[timedelta]:
     Returns:
         Optional[timedelta]: The parsed time duration or None if parsing fails.
     """
-    time_str = time_str.lower().replace(',', ' ').replace('and', ' ').replace('-', ' ')
-    pattern = r'(?P<value>\d+(\.\d+)?)\s*(?P<unit>[a-zA-Z]+)'
+    time_str = time_str.lower().replace(",", " ").replace("and", " ").replace("-", " ")
+    pattern = r"(?P<value>\d+(\.\d+)?)\s*(?P<unit>[a-zA-Z]+)"
     matches = re.finditer(pattern, time_str)
     kwargs = {}
     unit_map = {
-        'second': 'seconds', 'sec': 'seconds', 's': 'seconds',
-        'minute': 'minutes', 'min': 'minutes', 'm': 'minutes',
-        'hour': 'hours', 'h': 'hours',
-        'day': 'days', 'd': 'days',
-        'week': 'weeks', 'w': 'weeks',
-        'month': 'days', 'year': 'days', 'y': 'days'
+        "second": "seconds",
+        "sec": "seconds",
+        "s": "seconds",
+        "minute": "minutes",
+        "min": "minutes",
+        "m": "minutes",
+        "hour": "hours",
+        "h": "hours",
+        "day": "days",
+        "d": "days",
+        "week": "weeks",
+        "w": "weeks",
+        "month": "days",
+        "year": "days",
+        "y": "days",
     }
     for match in matches:
-        value, unit = float(match.group('value')), match.group('unit')
+        value, unit = float(match.group("value")), match.group("unit")
         key = next((v for k, v in unit_map.items() if unit.startswith(k)), None)
         if key:
             kwargs.setdefault(key, 0)
-            kwargs[key] += value * (30 if unit == 'month' else 365 if unit == 'year' else 1)
+            kwargs[key] += value * (30 if unit == "month" else 365 if unit == "year" else 1)
     return timedelta(**kwargs) if kwargs else None
+
 
 def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tuple[Optional[datetime], str]:
     """
@@ -213,7 +237,7 @@ def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tu
     """
     from dateparser import parse
 
-    time_keywords = ['in', 'on', 'after']
+    time_keywords = ["in", "on", "after"]
     time_keyword = None
     time_index = -1
 
@@ -221,7 +245,7 @@ def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tu
         time_keyword = args[0].lower()
         time_index = 0
     else:
-        message_text = ' '.join(args).strip()
+        message_text = " ".join(args).strip()
         if message_text:
             return None, message_text
         else:
@@ -231,8 +255,8 @@ def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tu
         return False, "Please provide a time after the keyword."
 
     for i in range(time_index + 2, len(args) + 1):
-        time_str = ' '.join(args[time_index + 1:i])
-        message_text = ' '.join(args[i:]).strip()
+        time_str = " ".join(args[time_index + 1 : i])
+        message_text = " ".join(args[i:]).strip()
         time_str_expanded = expand_time_units(time_str)
         if not time_str_expanded:
             continue
@@ -243,19 +267,23 @@ def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tu
                 return remind_time, message_text
             else:
                 continue
-        if any(c.isalpha() or c in ('/', '-') for c in time_str_expanded):
-            remind_time = parse(time_str_expanded, settings={
-                'TIMEZONE': 'UTC',
-                'RETURN_AS_TIMEZONE_AWARE': True,
-                'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': datetime.now(timezone.utc)
-            })
+        if any(c.isalpha() or c in ("/", "-") for c in time_str_expanded):
+            remind_time = parse(
+                time_str_expanded,
+                settings={
+                    "TIMEZONE": "UTC",
+                    "RETURN_AS_TIMEZONE_AWARE": True,
+                    "PREFER_DATES_FROM": "future",
+                    "RELATIVE_BASE": datetime.now(timezone.utc),
+                },
+            )
             if remind_time:
                 if message_text:
                     return remind_time, message_text
                 else:
                     continue
     return False, "Could not parse the time specified."
+
 
 def format_time_delta(delta: timedelta) -> str:
     """
@@ -268,8 +296,16 @@ def format_time_delta(delta: timedelta) -> str:
         str: Formatted time difference.
     """
     total_seconds = int(delta.total_seconds())
-    periods = [('d', 86400), ('h', 3600), ('m', 60), ('s', 1)]
-    return ' '.join(f"{value}{name}" for name, seconds in periods if (value := total_seconds // seconds) and not (total_seconds := total_seconds % seconds)) or '0s'
+    periods = [("d", 86400), ("h", 3600), ("m", 60), ("s", 1)]
+    return (
+        " ".join(
+            f"{value}{name}"
+            for name, seconds in periods
+            if (value := total_seconds // seconds) and not (total_seconds := total_seconds % seconds)
+        )
+        or "0s"
+    )
+
 
 def format_duration(seconds):
     """Formats the duration from seconds to a human-readable string."""
@@ -280,16 +316,18 @@ def format_duration(seconds):
     minutes, seconds = divmod(remainder, 60)
 
     parts = []
-    for value, unit in [(weeks, 'w'), (days, 'd'), (hours, 'h'), (minutes, 'm'), (seconds, 's')]:
+    for value, unit in [(weeks, "w"), (days, "d"), (hours, "h"), (minutes, "m"), (seconds, "s")]:
         if value:
             parts.append(f"{value}{unit}")
-    return ' '.join(parts) or '0s'
+    return " ".join(parts) or "0s"
+
 
 def get_afk_duration(start_time):
     """Calculates the AFK duration in seconds."""
     return time.time() - start_time
 
-def get_database_connection(db_path='reminders.db') -> sqlite3.Connection:
+
+def get_database_connection(db_path="reminders.db") -> sqlite3.Connection:
     """
     Establishes a connection to the SQLite database.
 
@@ -301,7 +339,8 @@ def get_database_connection(db_path='reminders.db') -> sqlite3.Connection:
     """
     return sqlite3.connect(db_path)
 
-def setup_database(db_path='reminders.db'):
+
+def setup_database(db_path="reminders.db"):
     """
     Sets up the reminders database with the necessary tables.
 
@@ -310,7 +349,8 @@ def setup_database(db_path='reminders.db'):
     """
     with get_database_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS reminders (
                 id TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -326,13 +366,16 @@ def setup_database(db_path='reminders.db'):
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             )
-        ''')
+        """
+        )
         cursor.execute("PRAGMA table_info(reminders)")
-        if 'created_at' not in [info[1] for info in cursor.fetchall()]:
-            cursor.execute("ALTER TABLE reminders ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00'")
+        if "created_at" not in [info[1] for info in cursor.fetchall()]:
+            cursor.execute(
+                "ALTER TABLE reminders ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00'"
+            )
 
 
-def remove_reminder(reminder_id: str, db_path='reminders.db'):
+def remove_reminder(reminder_id: str, db_path="reminders.db"):
     """
     Removes a reminder from the database.
 
@@ -342,11 +385,12 @@ def remove_reminder(reminder_id: str, db_path='reminders.db'):
     """
     with get_database_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM reminders WHERE id = ?', (reminder_id,))
+        cursor.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
         conn.commit()
 
+
 # DnD Database Setup
-def setup_dnd_database(db_path='twitch_bot.db'):
+def setup_dnd_database(db_path="twitch_bot.db"):
     """
     Sets up the DnD-related tables in the database.
 
@@ -357,7 +401,8 @@ def setup_dnd_database(db_path='twitch_bot.db'):
     cursor = conn.cursor()
 
     # Create game_users table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS game_users (
             user_id TEXT PRIMARY KEY,
             username TEXT NOT NULL,
@@ -375,10 +420,12 @@ def setup_dnd_database(db_path='twitch_bot.db'):
             skills TEXT, -- JSON string
             gear TEXT -- JSON string
         )
-    ''')
+    """
+    )
 
     # Create items table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS items (
             item_id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -386,10 +433,12 @@ def setup_dnd_database(db_path='twitch_bot.db'):
             stats TEXT, -- JSON string
             rarity TEXT NOT NULL
         )
-    ''')
+    """
+    )
 
     # Create quests table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS quests (
             quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
             description TEXT NOT NULL,
@@ -397,20 +446,24 @@ def setup_dnd_database(db_path='twitch_bot.db'):
             rewards TEXT, -- JSON string
             requirements TEXT -- JSON string
         )
-    ''')
+    """
+    )
 
     # Create combat table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS combat (
             combat_id INTEGER PRIMARY KEY AUTOINCREMENT,
             participant_ids TEXT NOT NULL, -- JSON array of user_ids
             status TEXT NOT NULL, -- ongoing, completed
             log TEXT -- JSON string
         )
-    ''')
+    """
+    )
 
     # Create duels table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS duels (
             duel_id INTEGER PRIMARY KEY AUTOINCREMENT,
             challenger_id TEXT NOT NULL,
@@ -418,16 +471,19 @@ def setup_dnd_database(db_path='twitch_bot.db'):
             status TEXT NOT NULL, -- ongoing, completed
             log TEXT -- JSON string
         )
-    ''')
+    """
+    )
 
     # Create parties table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS parties (
             party_id INTEGER PRIMARY KEY AUTOINCREMENT,
             member_ids TEXT NOT NULL, -- JSON array of user_ids
             status TEXT NOT NULL -- active, disbanded
         )
-    ''')
+    """
+    )
 
     conn.commit()
     conn.close()

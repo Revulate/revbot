@@ -4,6 +4,7 @@ import aiohttp
 import datetime
 from logger import logger
 
+
 class TwitchAPI:
     """Utility class for interacting with the Twitch Helix API."""
 
@@ -63,7 +64,7 @@ class TwitchAPI:
                             error_msg = f"Failed request after {retries} attempts: {response.status}"
                             logger.error(error_msg)
                             raise ValueError(error_msg)
-        
+
         error_msg = f"Failed to complete request after {retries} attempts."
         logger.error(error_msg)
         raise ValueError(error_msg)
@@ -72,10 +73,7 @@ class TwitchAPI:
         """Fetch streams for the specified user logins."""
         token = await self.get_oauth_token()
         url = f"{self.BASE_URL}/streams?" + "&".join([f"user_login={login}" for login in user_logins])
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-ID": self.client_id
-        }
+        headers = {"Authorization": f"Bearer {token}", "Client-ID": self.client_id}
         data = await self.request_with_retry(url, headers)
         return data.get("data", [])
 
@@ -83,9 +81,6 @@ class TwitchAPI:
         """Fetch user information for the specified user logins."""
         token = await self.get_oauth_token()
         url = f"{self.BASE_URL}/users?" + "&".join([f"login={login}" for login in user_logins])
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-ID": self.client_id
-        }
+        headers = {"Authorization": f"Bearer {token}", "Client-ID": self.client_id}
         data = await self.request_with_retry(url, headers)
         return data.get("data", [])

@@ -3,12 +3,13 @@ from twitchio.ext import commands
 import time
 import re
 
+
 class Afk(commands.Cog):
     MESSAGE_COOLDOWN_SECONDS = 3
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db_path = 'afk.db'
+        self.db_path = "afk.db"
         self._setup_database()
         self.last_afk_message_time = {}
         self.prefixes = self._get_prefixes()
@@ -20,12 +21,12 @@ class Afk(commands.Cog):
         If not, check for '_prefix'.
         If neither exists, return a default prefix.
         """
-        if hasattr(self.bot, 'prefix'):
+        if hasattr(self.bot, "prefix"):
             prefix = self.bot.prefix
-        elif hasattr(self.bot, '_prefix'):
+        elif hasattr(self.bot, "_prefix"):
             prefix = self.bot._prefix
         else:
-            prefix = '#'
+            prefix = "#"
 
         # Ensure prefixes are in a list
         if isinstance(prefix, list):
@@ -36,7 +37,8 @@ class Afk(commands.Cog):
     def _setup_database(self):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS afk (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT NOT NULL,
@@ -45,14 +47,15 @@ class Afk(commands.Cog):
                     return_time REAL,
                     active INTEGER NOT NULL DEFAULT 1
                 )
-            ''')
+            """
+            )
 
             # Check if 'return_time' and 'active' columns exist, and add them if they don't
             cursor.execute("PRAGMA table_info(afk)")
             columns = [info[1] for info in cursor.fetchall()]
-            if 'return_time' not in columns:
+            if "return_time" not in columns:
                 cursor.execute("ALTER TABLE afk ADD COLUMN return_time REAL")
-            if 'active' not in columns:
+            if "active" not in columns:
                 cursor.execute("ALTER TABLE afk ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
 
     @commands.command(name="afk", aliases=["sleep", "gn", "work", "food", "gaming", "bed"])
@@ -76,8 +79,10 @@ class Afk(commands.Cog):
             "bed": "sleeping",
             "work": "working",
             "food": "eating",
-            "gaming": "gaming"
-        }.get(command_used, "AFK")  # Default to "AFK" if alias not found
+            "gaming": "gaming",
+        }.get(
+            command_used, "AFK"
+        )  # Default to "AFK" if alias not found
 
         # Construct the full reason with user-provided details if any
         full_reason = f"{base_reason}: {reason}" if reason else base_reason
@@ -87,7 +92,8 @@ class Afk(commands.Cog):
         # Insert or update the AFK status in the database
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO afk (user_id, username, afk_time, reason, return_time, active)
                 VALUES (?, ?, ?, ?, NULL, 1)
                 ON CONFLICT(user_id) DO UPDATE SET
@@ -96,7 +102,9 @@ class Afk(commands.Cog):
                     reason=excluded.reason,
                     return_time=NULL,
                     active=1
-            ''', (user_id, username, afk_time, full_reason))
+            """,
+                (user_id, username, afk_time, full_reason),
+            )
 
         await ctx.send(f"@{username} is now {full_reason}")
 
@@ -112,7 +120,7 @@ class Afk(commands.Cog):
         # Retrieve the user's AFK entry
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT afk_time, reason, return_time, active FROM afk WHERE user_id = ?', (user_id,))
+            cursor.execute("SELECT afk_time, reason, return_time, active FROM afk WHERE user_id = ?", (user_id,))
             row = cursor.fetchone()
 
             if row:
@@ -121,14 +129,19 @@ class Afk(commands.Cog):
                     time_since_return = time.time() - return_time
                     if time_since_return <= 5 * 60:  # 5 minutes
                         # Resume AFK
-                        cursor.execute('''
+                        cursor.execute(
+                            """
                             UPDATE afk
                             SET active = 1, return_time = NULL
                             WHERE user_id = ?
-                        ''', (user_id,))
+                        """,
+                            (user_id,),
+                        )
                         await ctx.send(f"@{username} has resumed {full_reason}")
                     else:
-                        await ctx.send(f"@{username}, it's been more than 5 minutes since you returned. Cannot resume AFK.")
+                        await ctx.send(
+                            f"@{username}, it's been more than 5 minutes since you returned. Cannot resume AFK."
+                        )
                 else:
                     await ctx.send(f"@{username}, you are not eligible to resume AFK.")
             else:
@@ -147,7 +160,7 @@ class Afk(commands.Cog):
         username = message.author.name
 
         # Prevent the cog from responding to its own messages
-        if hasattr(self.bot, 'bot_user_id') and message.author.id == self.bot.bot_user_id:
+        if hasattr(self.bot, "bot_user_id") and message.author.id == self.bot.bot_user_id:
             return
 
         # Prevent responding to AFK commands themselves
@@ -163,7 +176,7 @@ class Afk(commands.Cog):
         # Check if the user is currently AFK
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT afk_time, reason, return_time, active FROM afk WHERE user_id = ?', (user_id,))
+            cursor.execute("SELECT afk_time, reason, return_time, active FROM afk WHERE user_id = ?", (user_id,))
             row = cursor.fetchone()
 
             if row:
@@ -185,8 +198,8 @@ class Afk(commands.Cog):
         time_string = self.format_duration_string(afk_duration)
 
         # Parse the full_reason into base_reason and user_reason
-        if ': ' in full_reason:
-            base_reason, user_reason = full_reason.split(': ', 1)
+        if ": " in full_reason:
+            base_reason, user_reason = full_reason.split(": ", 1)
         else:
             base_reason = full_reason
             user_reason = None
@@ -194,8 +207,8 @@ class Afk(commands.Cog):
         # Format the "no longer AFK" message based on whether a reason was provided
         no_longer_afk_message = (
             f"@{username} is no longer {base_reason}: {user_reason} ({time_string} ago)"
-            if user_reason else
-            f"@{username} is no longer {base_reason}. ({time_string} ago)"
+            if user_reason
+            else f"@{username} is no longer {base_reason}. ({time_string} ago)"
         )
 
         # Check if a "no longer AFK" message was recently sent to prevent spamming
@@ -213,11 +226,14 @@ class Afk(commands.Cog):
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE afk
                 SET active = 0, return_time = ?
                 WHERE user_id = ?
-            ''', (time.time(), user_id))
+            """,
+                (time.time(), user_id),
+            )
 
     def _remove_afk_entry(self, user_id):
         """
@@ -225,7 +241,7 @@ class Afk(commands.Cog):
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM afk WHERE user_id = ?', (user_id,))
+            cursor.execute("DELETE FROM afk WHERE user_id = ?", (user_id,))
 
     def is_afk_command(self, message):
         message_content = message.content.strip()
@@ -233,7 +249,7 @@ class Afk(commands.Cog):
         match = re.match(pattern, message_content)
         if match:
             command_used = match.group(2).lower()
-            return command_used in ['afk', 'sleep', 'gn', 'work', 'food', 'gaming', 'bed', 'rafk']
+            return command_used in ["afk", "sleep", "gn", "work", "food", "gaming", "bed", "rafk"]
         return False
 
     def format_duration_string(self, duration):
@@ -241,7 +257,7 @@ class Afk(commands.Cog):
         Takes a duration in seconds and returns a formatted string with non-zero components (days, hours, minutes, seconds)
         """
         days = int(duration // (24 * 3600))
-        duration %= (24 * 3600)
+        duration %= 24 * 3600
         hours = int(duration // 3600)
         duration %= 3600
         minutes = int(duration // 60)
@@ -257,7 +273,7 @@ class Afk(commands.Cog):
         if seconds > 0:
             time_components.append(f"{seconds}s")
 
-        return ' '.join(time_components)
+        return " ".join(time_components)
 
     def log_missing_data(self, message):
         # Implement logging for missing data if necessary
@@ -265,6 +281,7 @@ class Afk(commands.Cog):
             f"Received a message with missing data. Content: {getattr(message, 'content', 'None')}, "
             f"Channel: {getattr(message.channel, 'name', 'None')}"
         )
+
 
 def prepare(bot):
     bot.add_cog(Afk(bot))
