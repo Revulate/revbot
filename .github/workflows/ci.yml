@@ -21,8 +21,10 @@ jobs:
       # 2. Create and Activate Virtual Environment, then Install Dependencies
       - name: Set up Python Virtual Environment and Install Dependencies
         run: |
-          # Create a virtual environment in the revbot directory
-          python3.11 -m venv venv  # Adjust if using Python 3.10
+          # Create a virtual environment in the revbot directory if it doesn't exist
+          if [ ! -d "venv" ]; then
+            python3.11 -m venv venv  # Adjust to python3.10 if necessary
+          fi
           
           # Activate the virtual environment
           source venv/bin/activate
@@ -42,7 +44,11 @@ jobs:
           # Run Black with the necessary options
           python -m black --check --diff --line-length 120 .
 
-      # 4. Deploy to Raspberry Pi
+  deploy:
+    runs-on: self-hosted  # Use the self-hosted runner for deployment too
+    needs: build
+
+    steps:
       - name: Deploy to Raspberry Pi
         run: |
           REVUBOT_DIR=~/revbot
@@ -79,7 +85,5 @@ jobs:
           ACCESS_TOKEN=${{ secrets.ACCESS_TOKEN }}
           EOF
 
-          # Restart the Twitch bot service without needing a password
+          # Restart the Twitch bot service
           sudo systemctl restart twitch-bot.service
-
-                sudo systemctl restart twitch-bot.service
