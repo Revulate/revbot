@@ -34,9 +34,9 @@ jobs:
       - name: Run Black Formatter Check
         uses: psf/black@stable
         with:
-          black_args: --check --diff --line-length 120
-          src: .  # Specify the source directory
-          summary: true  # Provides a summary of formatting issues
+          options: --check --diff --line-length 120 --exclude '/venv|__pycache__/'
+          src: .
+          summary: true
 
   deploy:
     runs-on: ubuntu-latest
