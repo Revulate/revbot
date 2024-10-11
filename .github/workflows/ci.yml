@@ -3,7 +3,7 @@ name: Twitch Bot CI/CD Pipeline
 on:
   push:
     branches:
-      - main  # Changed from 'new-rewrite' to 'main'
+      - main
   pull_request:
     branches:
       - main
@@ -30,10 +30,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. Run Black Formatter Check
+      # 4. Run Black Formatter Check using a GitHub Action
       - name: Run Black Formatter Check
-        run: |
-          python -m black --check --diff . --line-length 120
+        uses: psf/black@stable
+        with:
+          args: --check --diff . --line-length 120
 
   deploy:
     runs-on: ubuntu-latest
