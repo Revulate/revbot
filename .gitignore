@@ -12,6 +12,7 @@ __pycache__/
 
 # Logs
 *.log
+*.log.1
 *.db
 
 # Virtual Environment
