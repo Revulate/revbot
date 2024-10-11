@@ -4,3 +4,7 @@ twitchio
 openai
 python-dotenv
 aiohttp
+rapidfuzz
+backoff
+aiosqlite
+logdna
