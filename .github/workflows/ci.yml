@@ -7,21 +7,21 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch:  # Allows manual triggering of the workflow
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: self-hosted  # Specifies that the job runs on your self-hosted runner
+    runs-on: self-hosted
     steps:
       # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # 2. Set up Python
-      - name: Set up Python 3.11
+      # 2. Set up Python 3.10
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       # 3. Install Dependencies
       - name: Install Dependencies
@@ -37,7 +37,7 @@ jobs:
           src: .
           summary: true
 
-      # 5. Deploy to Raspberry Pi Directly
+      # 5. Deploy to Raspberry Pi
       - name: Deploy to Raspberry Pi
         run: |
           REVUBOT_DIR=~/revbot
