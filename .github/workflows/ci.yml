@@ -18,19 +18,29 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # 2. Install Dependencies (Using Local Python Installation)
-      - name: Install Dependencies
+      # 2. Create and Activate Virtual Environment, then Install Dependencies
+      - name: Set up Python Virtual Environment and Install Dependencies
         run: |
-          python3.11 -m pip install --upgrade pip  # Use python3.11 if installed, or python3.10
+          # Create a virtual environment in the revbot directory
+          python3.11 -m venv venv  # Adjust if using Python 3.10
+          
+          # Activate the virtual environment
+          source venv/bin/activate
+          
+          # Upgrade pip inside the virtual environment
+          python -m pip install --upgrade pip
+
+          # Install the required dependencies inside the virtual environment
           pip install -r requirements.txt
 
       # 3. Run Black Formatter Check
       - name: Run Black Formatter Check
-        uses: psf/black@stable
-        with:
-          options: --check --diff --line-length 120 --exclude '/venv|__pycache__/'
-          src: .
-          summary: true
+        run: |
+          # Activate the virtual environment
+          source venv/bin/activate
+          
+          # Run Black with the necessary options
+          python -m black --check --diff --line-length 120 .
 
       # 4. Deploy to Raspberry Pi
       - name: Deploy to Raspberry Pi
@@ -51,16 +61,13 @@ jobs:
             git clone --branch main $REPO_URL .
           fi
 
-          # Create virtual environment if it doesn't exist
+          # Use the existing virtual environment or create one if necessary
           if [ ! -d "venv" ]; then
-            python3.11 -m venv venv  # Use python3.11 if installed, or python3.10
+            python3.11 -m venv venv  # Adjust to python3.10 if necessary
           fi
 
           # Activate the virtual environment
           source venv/bin/activate
-
-          # Upgrade pip within the virtual environment
-          python3.11 -m pip install --upgrade pip  # Use python3.11 if installed, or python3.10
 
           # Install dependencies within the virtual environment
           pip install -r requirements.txt
