@@ -11,108 +11,95 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted  # Runs directly on your Raspberry Pi
 
     steps:
+      # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
+      # 2. Create and Activate Virtual Environment, then Install Dependencies
+      - name: Set up Python Virtual Environment and Install Dependencies
         run: |
+          # Create a virtual environment in the revbot directory if it doesn't exist
+          if [ ! -d "venv" ]; then
+            python3.11 -m venv venv  # Adjust to python3.10 if necessary
+          fi
+          
+          # Activate the virtual environment
+          source venv/bin/activate
+          
+          # Upgrade pip inside the virtual environment
           python -m pip install --upgrade pip
+
+          # Install the required dependencies inside the virtual environment
           pip install -r requirements.txt
 
+      # 3. Run Black Formatter Check
       - name: Run Black Formatter Check
         run: |
-          pip install black
+          # Activate the virtual environment
+          source venv/bin/activate
+          
+          # Run Black with the necessary options
           python -m black --check --diff --line-length 120 .
 
   deploy:
+    runs-on: self-hosted  # Use the self-hosted runner for deployment too
     needs: build
-    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Create .env file
-        run: |
-          echo "TWITCH_CLIENT_ID=${{ secrets.TWITCH_CLIENT_ID }}" >> .env
-          echo "TWITCH_CLIENT_SECRET=${{ secrets.TWITCH_CLIENT_SECRET }}" >> .env
-          echo "ACCESS_TOKEN=${{ secrets.ACCESS_TOKEN }}" >> .env
-          echo "REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}" >> .env
-          echo "BOT_NICK=${{ secrets.BOT_NICK }}" >> .env
-          echo "TWITCH_CHANNELS=${{ secrets.TWITCH_CHANNELS }}" >> .env
-          echo "COMMAND_PREFIX=${{ secrets.COMMAND_PREFIX }}" >> .env
-          echo "ADMIN_USERS=${{ secrets.ADMIN_USERS }}" >> .env
-          echo "BOT_USER_ID=${{ secrets.BOT_USER_ID }}" >> .env
-          echo "BROADCASTER_USER_ID=${{ secrets.BROADCASTER_USER_ID }}" >> .env
-          echo "LOG_LEVEL=${{ secrets.LOG_LEVEL }}" >> .env
-          echo "LOG_FILE=${{ secrets.LOG_FILE }}" >> .env
-          echo "LOG_MAX_BYTES=${{ secrets.LOG_MAX_BYTES }}" >> .env
-          echo "LOG_BACKUP_COUNT=${{ secrets.LOG_BACKUP_COUNT }}" >> .env
-          echo "API_STEAM_KEY=${{ secrets.API_STEAM_KEY }}" >> .env
-          echo "LOGDNA_INGESTION_KEY=${{ secrets.LOGDNA_INGESTION_KEY }}" >> .env
-          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
-          echo "WEATHER_API_KEY=${{ secrets.WEATHER_API_KEY }}" >> .env
-          echo "NUULS_API_KEY=${{ secrets.NUULS_API_KEY }}" >> .env
-
       - name: Deploy to Raspberry Pi
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.RPI_HOST }}
-          username: ${{ secrets.RPI_USER }}
-          key: ${{ secrets.PI_SSH_KEY }}
-          port: ${{ secrets.PI_PORT }}
-          script: |
-            REVUBOT_DIR=~/revbot
-            REPO_URL=https://github.com/Revulate/revbot.git
+        run: |
+          REVUBOT_DIR=~/revbot
+          REPO_URL=https://github.com/Revulate/revbot.git
 
-            # Create revbot directory if it doesn't exist
-            mkdir -p $REVUBOT_DIR
-            cd $REVUBOT_DIR
+          # Create revbot directory if it doesn't exist
+          mkdir -p $REVUBOT_DIR
+          cd $REVUBOT_DIR
 
-            # If .git exists, pull; else, clone the repository
-            if [ -d ".git" ]; then
-              git fetch origin
-              git checkout main
-              git pull origin main
-            else
-              git clone --branch main $REPO_URL .
-            fi
+          # If .git exists, pull; else, clone the repository
+          if [ -d ".git" ]; then
+            git fetch origin
+            git checkout main
+            git pull origin main
+          else
+            git clone --branch main $REPO_URL .
+          fi
 
-            # Use the existing virtual environment or create one if necessary
-            if [ ! -d "venv" ]; then
-              python3.11 -m venv venv  # Adjust to python3.10 if necessary
-            fi
+          # Use the existing virtual environment or create one if necessary
+          if [ ! -d "venv" ]; then
+            python3.11 -m venv venv  # Adjust to python3.10 if necessary
+          fi
 
-            # Activate the virtual environment
-            source venv/bin/activate
+          # Activate the virtual environment
+          source venv/bin/activate
 
-            # Install dependencies within the virtual environment
-            pip install -r requirements.txt
+          # Install dependencies within the virtual environment
+          pip install -r requirements.txt
 
-      - name: Copy .env file to Raspberry Pi
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.RPI_HOST }}
-          username: ${{ secrets.RPI_USER }}
-          key: ${{ secrets.PI_SSH_KEY }}
-          port: ${{ secrets.PI_PORT }}
-          source: ".env"
-          target: "~/revbot"
+          # Create or update the .env file
+          cat <<EOF > .env
+          TWITCH_CLIENT_ID=${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET=${{ secrets.TWITCH_CLIENT_SECRET }}
+          ACCESS_TOKEN=${{ secrets.ACCESS_TOKEN }}
+          REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
+          BOT_NICK=${{ secrets.BOT_NICK }}
+          TWITCH_CHANNELS=${{ secrets.TWITCH_CHANNELS }}
+          COMMAND_PREFIX=${{ secrets.COMMAND_PREFIX }}
+          ADMIN_USERS=${{ secrets.ADMIN_USERS }}
+          BOT_USER_ID=${{ secrets.BOT_USER_ID }}
+          BROADCASTER_USER_ID=${{ secrets.BROADCASTER_USER_ID }}
+          LOG_LEVEL=${{ secrets.LOG_LEVEL }}
+          LOG_FILE=${{ secrets.LOG_FILE }}
+          LOG_MAX_BYTES=${{ secrets.LOG_MAX_BYTES }}
+          LOG_BACKUP_COUNT=${{ secrets.LOG_BACKUP_COUNT }}
+          API_STEAM_KEY=${{ secrets.API_STEAM_KEY }}
+          LOGDNA_INGESTION_KEY=${{ secrets.LOGDNA_INGESTION_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          WEATHER_API_KEY=${{ secrets.WEATHER_API_KEY }}
+          NUULS_API_KEY=${{ secrets.NUULS_API_KEY }}
+          EOF
 
-      - name: Restart Twitch Bot Service
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.RPI_HOST }}
-          username: ${{ secrets.RPI_USER }}
-          key: ${{ secrets.PI_SSH_KEY }}
-          port: ${{ secrets.PI_PORT }}
-          script: |
-            sudo systemctl restart twitch-bot.service
+          # Restart the Twitch bot service
+          sudo systemctl restart twitch-bot.service
