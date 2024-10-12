@@ -63,7 +63,6 @@ class User(commands.Cog):
                 return
 
             user = users[0]
-            broadcaster_type = self.format_enum(user.broadcaster_type)
             account_age = self.format_account_age(user.created_at)
 
             # Fetch the broadcaster's user ID
@@ -82,7 +81,6 @@ class User(commands.Cog):
             response = (
                 f"@{ctx.author.name}, User info for {user.display_name} (twitch.tv/{user.name}): "
                 f"ID: {user.id} | "
-                f"Broadcaster Type: {broadcaster_type} | "
                 f"Created: {account_age} | "
                 f"Bio: {user.description[:100]}{'...' if len(user.description) > 100 else ''} | "
                 f"Profile Picture: {user.profile_image}"
