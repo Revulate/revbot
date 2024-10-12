@@ -26,7 +26,6 @@ COGS = [
     "cogs.create",
 ]
 
-
 class TwitchBot(commands.Bot):
     def __init__(self):
         self.logger = logger
@@ -35,6 +34,7 @@ class TwitchBot(commands.Bot):
         token = os.getenv("ACCESS_TOKEN")
         client_id = os.getenv("TWITCH_CLIENT_ID")
         client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+        refresh_token = os.getenv("REFRESH_TOKEN")
         nick = os.getenv("BOT_NICK")
         prefix = os.getenv("COMMAND_PREFIX", "#")
         channels = os.getenv("TWITCH_CHANNELS", "").split(",")
@@ -55,20 +55,32 @@ class TwitchBot(commands.Bot):
         self.context_class = CustomContext
 
         # Initialize TwitchAPI
-        self.twitch_api = TwitchAPI(client_id, client_secret, token)
+        self.twitch_api = TwitchAPI(client_id, client_secret, token, refresh_token)
 
-    def _check_env_variables(self):
-        for var_name in ["ACCESS_TOKEN", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "BOT_NICK"]:
-            if not os.getenv(var_name):
-                error_msg = f"{var_name} is not set in the environment variables."
-                self.logger.error(error_msg)
-                raise ValueError(error_msg)
+    async def setup_auth(self):
+        """Set up authentication if needed."""
+        if not self.twitch_api.oauth_token or not self.twitch_api.refresh_token:
+            flow_id, auth_url = await self.twitch_api.create_auth_flow(
+                "YourAppName",
+                ["chat:read", "chat:edit", "channel:moderate", "whispers:read", "whispers:edit"]
+            )
+            if flow_id and auth_url:
+                print(f"Please visit this URL to authorize the application: {auth_url}")
+                print("Waiting for authorization...")
+                
+                while True:
+                    if await self.twitch_api.check_auth_status(flow_id):
+                        print("Authorization successful!")
+                        break
+                    await asyncio.sleep(5)
+            else:
+                raise ValueError("Failed to create authorization flow.")
 
     async def event_ready(self):
         self.logger.info(f"Logged in as | {self.nick}")
         await self.fetch_user_id()
         await self.fetch_example_streams()
-        self.load_modules()  # Changed to synchronous call
+        self.load_modules()
 
     async def event_channel_joined(self, channel):
         self.logger.info(f"Joined channel: {channel.name}")
@@ -111,6 +123,11 @@ class TwitchBot(commands.Bot):
                 self.logger.info(f"Loaded extension: {cog_name}")
             except Exception as e:
                 self.logger.error(f"Failed to load extension {cog}: {e}", exc_info=True)
+
+def run(self):
+    """Run the bot with authentication setup."""
+    self.loop.run_until_complete(self.setup_auth())
+    super().run()
 
 
 def main():
