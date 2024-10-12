@@ -26,6 +26,7 @@ COGS = [
     "cogs.create",
 ]
 
+
 class TwitchBot(commands.Bot):
     def __init__(self):
         self.logger = logger
@@ -61,13 +62,12 @@ class TwitchBot(commands.Bot):
         """Set up authentication if needed."""
         if not self.twitch_api.oauth_token or not self.twitch_api.refresh_token:
             flow_id, auth_url = await self.twitch_api.create_auth_flow(
-                "YourAppName",
-                ["chat:read", "chat:edit", "channel:moderate", "whispers:read", "whispers:edit"]
+                "YourAppName", ["chat:read", "chat:edit", "channel:moderate", "whispers:read", "whispers:edit"]
             )
             if flow_id and auth_url:
                 print(f"Please visit this URL to authorize the application: {auth_url}")
                 print("Waiting for authorization...")
-                
+
                 while True:
                     if await self.twitch_api.check_auth_status(flow_id):
                         print("Authorization successful!")
@@ -123,6 +123,7 @@ class TwitchBot(commands.Bot):
                 self.logger.info(f"Loaded extension: {cog_name}")
             except Exception as e:
                 self.logger.error(f"Failed to load extension {cog}: {e}", exc_info=True)
+
 
 def run(self):
     """Run the bot with authentication setup."""

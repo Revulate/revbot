@@ -6,6 +6,7 @@ import asyncio
 import base64
 from logger import logger
 
+
 class TwitchAPI:
     """Utility class for interacting with the Twitch Helix API."""
 
@@ -75,7 +76,7 @@ class TwitchAPI:
         encoded_title = base64.b64encode(application_title.encode()).decode()
         scopes_string = "+".join(scopes)
         url = f"{self.TOKEN_GENERATOR_BASE_URL}/create/{encoded_title}/{scopes_string}"
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
@@ -92,7 +93,7 @@ class TwitchAPI:
     async def check_auth_status(self, flow_id):
         """Check the status of an authorization flow."""
         url = f"{self.TOKEN_GENERATOR_BASE_URL}/status/{flow_id}"
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
