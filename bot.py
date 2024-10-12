@@ -1,5 +1,3 @@
-# bot.py
-
 import os
 import asyncio
 import random
@@ -23,7 +21,9 @@ COGS = [
     "cogs.admin",
     "cogs.gpt",
     "cogs.spc",
-    "cogs.create",
+    "cogs.user",
+    "cogs.lastmessage",
+    # "cogs.create",
 ]
 
 
@@ -57,6 +57,15 @@ class TwitchBot(commands.Bot):
 
         # Initialize TwitchAPI
         self.twitch_api = TwitchAPI(client_id, client_secret, token, refresh_token)
+
+    def _check_env_variables(self):
+        """Check for missing critical environment variables."""
+        required_vars = ["ACCESS_TOKEN", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "BOT_NICK", "REFRESH_TOKEN"]
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        if missing_vars:
+            error_msg = f"The following environment variables are missing: {', '.join(missing_vars)}"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
     async def setup_auth(self):
         """Set up authentication if needed."""

@@ -1,8 +1,5 @@
-# cogs/preview.py
-
 import os
 from dotenv import load_dotenv
-import aiohttp
 from twitchio.ext import commands
 from asyncio import sleep
 from datetime import datetime, timezone
@@ -11,7 +8,7 @@ load_dotenv()
 
 
 class Preview(commands.Cog):
-    """Cog for displaying the preview thumbnail and details of a specified Twitch stream."""
+    """Cog for displaying the preview thumbnail and details of a specified Twitch channel."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -22,40 +19,36 @@ class Preview(commands.Cog):
 
     async def get_channel_info(self, channel_name):
         """Fetch channel information from Twitch API."""
-        users = await self.bot.fetch_users(names=[channel_name])
-        if not users:
+        try:
+            # Fetch user information
+            users = await self.bot.fetch_users(names=[channel_name])
+            if not users:
+                return None
+            user = users[0]
+
+            # Fetch channel information
+            channels = await self.bot.fetch_channels([user.id])
+            if not channels:
+                return None
+            channel_info = channels[0]
+
+            # Fetch stream information
+            streams = await self.bot.fetch_streams(user_ids=[user.id])
+            stream_data = streams[0] if streams else None
+
+            # Fetch videos for last live information
+            videos = await self.bot.fetch_videos(user_id=user.id, type="archive")
+            last_video = videos[0] if videos else None
+
+            return {"user": user, "channel_info": channel_info, "stream_data": stream_data, "last_video": last_video}
+        except Exception as e:
+            self.bot.logger.error(f"Error fetching channel info: {e}")
             return None
-
-        user = users[0]
-        streams = await self.bot.fetch_streams(user_logins=[channel_name])
-
-        channel_info = {
-            "id": user.id,
-            "name": user.name,
-            "is_live": False,
-            "viewer_count": 0,
-            "title": "Offline",
-            "game_name": "N/A",
-            "thumbnail_url": f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel_name.lower()}.jpg",
-            "started_at": None,
-        }
-
-        if streams:
-            stream = streams[0]
-            channel_info.update(
-                {
-                    "is_live": True,
-                    "viewer_count": stream.viewer_count,
-                    "title": stream.title,
-                    "game_name": stream.game_name,
-                    "started_at": stream.started_at,
-                }
-            )
-
-        return channel_info
 
     def format_duration(self, duration):
         """Format timedelta into a human-readable string."""
+        if not duration:
+            return "Unknown duration"
         days, seconds = duration.days, duration.seconds
         hours, seconds = divmod(seconds, 3600)
         minutes, seconds = divmod(seconds, 60)
@@ -86,32 +79,47 @@ class Preview(commands.Cog):
         for attempt in range(retry_count):
             try:
                 self.bot.logger.debug(f"Getting info for channel '{channel_name}' (Attempt {attempt + 1})")
-                channel_info = await self.get_channel_info(channel_name)
+                channel_data = await self.get_channel_info(channel_name)
 
-                if not channel_info:
+                if not channel_data:
                     self.bot.logger.error(f"Invalid or missing channel information for '{channel_name}'.")
                     await ctx.send(
                         f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct."
                     )
                     return
 
+                user = channel_data["user"]
+                channel_info = channel_data["channel_info"]
+                stream_data = channel_data["stream_data"]
+                last_video = channel_data["last_video"]
+
                 now = datetime.now(timezone.utc)
-                if channel_info["is_live"]:
-                    duration = now - channel_info["started_at"]
-                    status = f"LIVE ({self.format_duration(duration)})"
-                    viewers = f"{channel_info['viewer_count']:,} viewers"
+                if stream_data:
+                    duration = now - stream_data.started_at if stream_data.started_at else None
+                    status = f"LIVE ({self.format_duration(duration)})" if duration else "LIVE"
+                    viewers = f"{stream_data.viewer_count:,} viewers"
+
                     response = (
-                        f"@{ctx.author.name}, Channel: https://twitch.tv/{channel_info['name']} | "
+                        f"@{ctx.author.name}, twitch.tv/{user.name} | "
                         f"Status: {status} | "
                         f"Viewers: {viewers} | "
-                        f"Category: {channel_info['game_name']} | "
-                        f"Title: {channel_info['title']} | "
-                        f"Preview: {channel_info['thumbnail_url']}"
+                        f"Category: {channel_info.game_name} | "
+                        f"Title: {channel_info.title} | "
+                        f"Preview: {stream_data.thumbnail_url.format(width='320', height='180')}"
                     )
                 else:
                     status = "OFFLINE"
+                    last_live = "Unknown"
+                    if last_video:
+                        time_since_live = now - last_video.created_at
+                        last_live = self.format_duration(time_since_live)
+
                     response = (
-                        f"@{ctx.author.name}, Channel: https://twitch.tv/{channel_info['name']} | " f"Status: {status}"
+                        f"@{ctx.author.name}, twitch.tv/{user.name} | "
+                        f"Status: {status} | "
+                        f"Last Live: {last_live} ago | "
+                        f"Category: {channel_info.game_name} | "
+                        f"Title: {channel_info.title}"
                     )
 
                 await ctx.send(response)

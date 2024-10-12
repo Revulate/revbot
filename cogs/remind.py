@@ -209,7 +209,9 @@ class Remind(commands.Cog):
                 "SELECT * FROM reminders WHERE target_id = ? AND trigger_on_message = 1 AND active = 1", (user_id,)
             ) as cursor:
                 rows = await cursor.fetchall()
-        self.logger.debug(f"Fetched {len(rows)} trigger_on_message reminders for user {user_id}.")
+
+        if rows:
+            self.logger.debug(f"Fetched {len(rows)} trigger_on_message reminders for user {user_id}.")
 
         for row in rows:
             if len(row) != 13:
@@ -285,7 +287,7 @@ class Remind(commands.Cog):
             created_at = created_at.replace(tzinfo=timezone.utc)
 
         # Parse reminder time from message
-        remind_time_delta, message = parse_time(message)
+        remind_time_delta, message = parse_time(message.split())
         remind_time = created_at + remind_time_delta if remind_time_delta else None
 
         reminder = Reminder(
