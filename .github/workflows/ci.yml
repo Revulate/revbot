@@ -51,6 +51,7 @@ jobs:
     steps:
       - name: Deploy to Raspberry Pi
         run: |
+          set -e  # Exit immediately if a command exits with a non-zero status
           REVUBOT_DIR=~/revbot
           REPO_URL=https://github.com/Revulate/revbot.git
 
@@ -103,3 +104,19 @@ jobs:
 
           # Restart the Twitch bot service
           sudo systemctl restart twitch-bot.service
+          
+          # Add error logging for the restart command
+          if ! sudo systemctl restart twitch-bot.service; then
+            echo "Error: Failed to restart twitch-bot service"
+            echo "Service Status:"
+            sudo systemctl status twitch-bot.service
+            echo "Sudo Version:"
+            sudo --version
+            echo "Current User:"
+            whoami
+            echo "Sudo Permissions:"
+            sudo -l
+            exit 1
+          fi
+
+          echo "Deployment completed successfully"
