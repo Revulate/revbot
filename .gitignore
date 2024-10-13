@@ -1,5 +1,6 @@
 # .gitignore
 credentials.json
+twitch_tokens.json
 
 # Python
 __pycache__/
