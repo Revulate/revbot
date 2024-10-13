@@ -1,11 +1,10 @@
-# twitch_helix_client.py
-
 import aiohttp
 import datetime
 import asyncio
 import base64
 from logger import logger
-
+import json
+import os
 
 class TwitchAPI:
     """Utility class for interacting with the Twitch Helix API."""
@@ -20,56 +19,168 @@ class TwitchAPI:
         self.oauth_token = access_token
         self.refresh_token = refresh_token
         self.token_expiry = None
+        self.session = None
 
         if not self.client_id or not self.client_secret:
             raise ValueError("CLIENT_ID and CLIENT_SECRET must be provided.")
 
-    async def get_oauth_token(self):
-        """Fetch OAuth token for Twitch API."""
+        self.load_tokens()
+        if self.oauth_token and self.refresh_token:
+            self.save_tokens()  # Save tokens if they were provided in the constructor
+
+    async def initialize_session(self):
+        """Initialize the aiohttp session."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+
+    async def close_session(self):
+        """Close the aiohttp session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+
+    def load_tokens(self):
+        """Load tokens from a file."""
+        token_file = 'twitch_tokens.json'
+        logger.info(f"Attempting to load tokens from {token_file}")
+        try:
+            if os.path.exists(token_file):
+                with open(token_file, 'r') as f:
+                    data = json.load(f)
+                    self.oauth_token = data.get('access_token')
+                    self.refresh_token = data.get('refresh_token')
+                    expiry = data.get('expiry')
+                    self.token_expiry = datetime.datetime.fromisoformat(expiry) if expiry else None
+                logger.info("Tokens loaded successfully")
+            else:
+                logger.info(f"Token file {token_file} not found")
+        except json.JSONDecodeError:
+            logger.error("Error decoding saved tokens. Will authenticate from scratch.")
+        except Exception as e:
+            logger.error(f"Unexpected error loading tokens: {e}")
+
+    def save_tokens(self):
+        """Save tokens to a file."""
+        token_file = 'twitch_tokens.json'
+        logger.info(f"Attempting to save tokens to {token_file}")
+        data = {
+            'access_token': self.oauth_token,
+            'refresh_token': self.refresh_token,
+            'expiry': self.token_expiry.isoformat() if self.token_expiry else None
+        }
+        try:
+            with open(token_file, 'w') as f:
+                json.dump(data, f)
+            logger.info("Tokens saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving tokens: {e}")
+
+    async def ensure_token_valid(self):
+        """Ensure the OAuth token is valid, refreshing if necessary."""
         if not self.oauth_token or (self.token_expiry and datetime.datetime.now() >= self.token_expiry):
             await self.refresh_oauth_token()
-        return self.oauth_token
 
     async def refresh_oauth_token(self):
         """Refresh OAuth token using refresh token if available, otherwise use client credentials flow."""
         if self.refresh_token:
-            await self._refresh_token_with_refresh_token()
+            success = await self._refresh_token_with_refresh_token()
+            if not success:
+                await self._refresh_token_with_client_credentials()
         else:
             await self._refresh_token_with_client_credentials()
+        self.save_tokens()  # Save tokens after refreshing
 
     async def _refresh_token_with_refresh_token(self):
         """Refresh OAuth token using the refresh token."""
         url = f"{self.TOKEN_GENERATOR_BASE_URL}/refresh/{self.refresh_token}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
+        await self.initialize_session()
+        try:
+            async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     self.oauth_token = data.get("access_token")
                     self.refresh_token = data.get("refresh_token")
                     expires_in = data.get("expires_in", 0)
                     self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
+                    self.save_tokens()  # Save tokens after successful refresh
                     logger.info("OAuth token refreshed successfully using refresh token.")
+                    return True
                 else:
                     error_msg = f"Failed to refresh OAuth token using refresh token. Status: {response.status}"
                     logger.error(error_msg)
-                    # Fallback to client credentials flow
-                    await self._refresh_token_with_client_credentials()
+                    return False
+        except Exception as e:
+            logger.error(f"Exception during token refresh: {e}")
+            return False
 
     async def _refresh_token_with_client_credentials(self):
         """Refresh OAuth token using client credentials flow."""
         url = f"{self.TOKEN_URL}?client_id={self.client_id}&client_secret={self.client_secret}&grant_type=client_credentials"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url) as response:
+        await self.initialize_session()
+        try:
+            async with self.session.post(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     self.oauth_token = data.get("access_token")
                     expires_in = data.get("expires_in", 0)
                     self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
+                    self.save_tokens()  # Save tokens after successful refresh
                     logger.info("OAuth token refreshed successfully using client credentials.")
                 else:
                     error_msg = f"Failed to retrieve OAuth token. Status: {response.status}"
                     logger.error(error_msg)
                     raise ValueError(error_msg)
+        except Exception as e:
+            logger.error(f"Exception during token refresh: {e}")
+            raise
+
+    async def api_request(self, endpoint, params=None, method='GET', data=None):
+        """Make an API request to Twitch, handling token refresh if needed."""
+        await self.ensure_token_valid()
+        url = f"{self.BASE_URL}/{endpoint}"
+        headers = {
+            "Authorization": f"Bearer {self.oauth_token}",
+            "Client-ID": self.client_id,
+            "Content-Type": "application/json"
+        }
+        await self.initialize_session()
+        try:
+            if method == 'GET':
+                async with self.session.get(url, params=params, headers=headers) as response:
+                    return await self._handle_response(response)
+            elif method == 'POST':
+                async with self.session.post(url, params=params, headers=headers, json=data) as response:
+                    return await self._handle_response(response)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+        except aiohttp.ClientError as e:
+            logger.error(f"HTTP error during API request: {e}")
+            raise
+
+    async def _handle_response(self, response):
+        """Handle the API response, refreshing the token if necessary."""
+        if response.status == 200:
+            return await response.json()
+        elif response.status == 401:
+            logger.warning("Received 401 error. Attempting to refresh token.")
+            await self.refresh_oauth_token()
+            # Retry the request with the new token
+            return await self.api_request(response.url.path, params=response.url.query)
+        else:
+            error_msg = f"API request failed. Status: {response.status}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+    async def get_streams(self, user_logins):
+        """Fetch streams for the specified user logins."""
+        params = {"user_login": user_logins}
+        return await self.api_request("streams", params=params)
+
+    async def get_users(self, user_logins):
+        """Fetch user information for the specified user logins."""
+        params = {"login": user_logins}
+        return await self.api_request("users", params=params)
+
+    # Add other Twitch API methods as needed...
 
     async def create_auth_flow(self, application_title, scopes):
         """Create an authorization flow for the user."""
@@ -77,79 +188,37 @@ class TwitchAPI:
         scopes_string = "+".join(scopes)
         url = f"{self.TOKEN_GENERATOR_BASE_URL}/create/{encoded_title}/{scopes_string}"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("success"):
-                        return data.get("id"), data.get("message")
-                    else:
-                        logger.error(f"Failed to create auth flow: {data.get('message')}")
-                        return None, None
+        await self.initialize_session()
+        async with self.session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                if data.get("success"):
+                    return data.get("id"), data.get("message")
                 else:
-                    logger.error(f"Failed to create auth flow. Status: {response.status}")
+                    logger.error(f"Failed to create auth flow: {data.get('message')}")
                     return None, None
+            else:
+                logger.error(f"Failed to create auth flow. Status: {response.status}")
+                return None, None
 
     async def check_auth_status(self, flow_id):
         """Check the status of an authorization flow."""
         url = f"{self.TOKEN_GENERATOR_BASE_URL}/status/{flow_id}"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("success"):
-                        self.oauth_token = data.get("token")
-                        self.refresh_token = data.get("refresh")
-                        expires_in = data.get("expires_in", 0)
-                        self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
-                        return True
-                    else:
-                        logger.info(f"Auth status: {data.get('message')}")
-                        return False
+        await self.initialize_session()
+        async with self.session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                if data.get("success"):
+                    self.oauth_token = data.get("token")
+                    self.refresh_token = data.get("refresh")
+                    expires_in = data.get("expires_in", 0)
+                    self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
+                    self.save_tokens()
+                    return True
                 else:
-                    logger.error(f"Failed to check auth status. Status: {response.status}")
+                    logger.info(f"Auth status: {data.get('message')}")
                     return False
-
-    def update_access_token(self, new_token):
-        """Update the access token."""
-        self.oauth_token = new_token
-        self.token_expiry = datetime.datetime.now() + datetime.timedelta(hours=1)
-        logger.info("Access token updated.")
-
-    async def request_with_retry(self, url, headers, retries=3):
-        """Helper function to retry a request with token refresh on failure."""
-        for attempt in range(retries):
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        return await response.json()
-                    elif response.status == 401:
-                        logger.warning("Token expired, refreshing...")
-                        self.oauth_token = None
-                        await self.refresh_oauth_token()
-                    else:
-                        if attempt == retries - 1:
-                            error_msg = f"Failed request after {retries} attempts: {response.status}"
-                            logger.error(error_msg)
-                            raise ValueError(error_msg)
-
-        error_msg = f"Failed to complete request after {retries} attempts."
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-
-    async def get_streams(self, user_logins):
-        """Fetch streams for the specified user logins."""
-        token = await self.get_oauth_token()
-        url = f"{self.BASE_URL}/streams?" + "&".join([f"user_login={login}" for login in user_logins])
-        headers = {"Authorization": f"Bearer {token}", "Client-ID": self.client_id}
-        data = await self.request_with_retry(url, headers)
-        return data.get("data", [])
-
-    async def get_users(self, user_logins):
-        """Fetch user information for the specified user logins."""
-        token = await self.get_oauth_token()
-        url = f"{self.BASE_URL}/users?" + "&".join([f"login={login}" for login in user_logins])
-        headers = {"Authorization": f"Bearer {token}", "Client-ID": self.client_id}
-        data = await self.request_with_retry(url, headers)
-        return data.get("data", [])
+            else:
+                logger.error(f"Failed to check auth status. Status: {response.status}")
+                return False

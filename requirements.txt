@@ -9,3 +9,13 @@ backoff
 aiosqlite
 logdna
 black
+pandas 
+openpyxl 
+playwright
+fuzzywuzzy 
+python-Levenshtein
+google-auth
+google-auth-oauthlib 
+google-auth-httplib2 
+google-api-python-client
+unidecode

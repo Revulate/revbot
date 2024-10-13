@@ -39,8 +39,12 @@ class User(commands.Cog):
     async def get_ban_info(self, broadcaster_id, user_id):
         """Fetch ban information for a user in a specific broadcaster's channel."""
         try:
-            bans = await self.bot.fetch_channel_bans(broadcaster_id, user_ids=[user_id])
-            return bans[0] if bans else None
+            if hasattr(self.bot, 'fetch_channel_bans'):
+                bans = await self.bot.fetch_channel_bans(broadcaster_id, user_ids=[user_id])
+                return bans[0] if bans else None
+            else:
+                self.bot.logger.warning("fetch_channel_bans method not available. Unable to fetch ban info.")
+                return None
         except Exception as e:
             self.bot.logger.error(f"Error fetching ban info: {e}")
             return None

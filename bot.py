@@ -23,7 +23,7 @@ COGS = [
     "cogs.spc",
     "cogs.user",
     "cogs.lastmessage",
-    # "cogs.create",
+    "cogs.dvp",  # Make sure this line is included
 ]
 
 
@@ -57,6 +57,8 @@ class TwitchBot(commands.Bot):
 
         # Initialize TwitchAPI
         self.twitch_api = TwitchAPI(client_id, client_secret, token, refresh_token)
+        self.twitch_api.save_tokens()  # Explicitly save tokens after initialization
+        self.logger.info("TwitchAPI instance created and tokens saved")
 
     def _check_env_variables(self):
         """Check for missing critical environment variables."""
@@ -91,6 +93,18 @@ class TwitchBot(commands.Bot):
         await self.fetch_example_streams()
         self.load_modules()
 
+        # Test API call
+        try:
+            user_info = await self.twitch_api.get_users([self.nick])
+            self.logger.info(f"Successfully fetched user info: {user_info}")
+        except Exception as e:
+            self.logger.error(f"Error fetching user info: {e}")
+
+        # Check token status
+        self.logger.info(f"Current access token: {self.twitch_api.oauth_token[:10]}...")
+        self.logger.info(f"Current refresh token: {self.twitch_api.refresh_token[:10]}..." if self.twitch_api.refresh_token else "No refresh token")
+        self.logger.info(f"Token expiry: {self.twitch_api.token_expiry}")
+
     async def event_channel_joined(self, channel):
         self.logger.info(f"Joined channel: {channel.name}")
 
@@ -119,20 +133,49 @@ class TwitchBot(commands.Bot):
     async def fetch_example_streams(self):
         try:
             streams = await self.twitch_api.get_streams(["afro", "cohhcarnage"])
-            for stream in streams:
-                self.logger.info(f"Stream found: {stream['user_name']} is live with {stream['viewer_count']} viewers.")
+            for stream in streams.get('data', []):
+                self.logger.info(f"Stream found: {stream.get('user_name')} is live with {stream.get('viewer_count')} viewers.")
         except Exception as e:
             self.logger.error(f"Error fetching streams: {e}", exc_info=True)
 
     def load_modules(self):
         for cog in COGS:
             try:
+                self.logger.info(f"Attempting to load extension: {cog}")
                 self.load_module(cog)
-                cog_name = cog.split(".")[-1].capitalize()
+                cog_name = cog.split(".")[-1]
                 self.logger.info(f"Loaded extension: {cog_name}")
+
+                # Log all commands after loading each cog
+                all_commands = [cmd.name for cmd in self.commands.values() if isinstance(cmd, commands.Command)]
+                self.logger.info(f"Current commands after loading {cog_name}: {', '.join(all_commands)}")
+
+                # Get the cog instance using case-insensitive matching
+                cog_instance = next(
+                    (cog for name, cog in self.cogs.items() if name.lower() == cog_name.lower()),
+                    None
+                )
+                if cog_instance:
+                    # Get commands associated with the cog
+                    cog_commands = [cmd.name for cmd in self.commands.values() if cmd.cog == cog_instance]
+                    if cog_commands:
+                        self.logger.info(f"Commands added by {cog_name}: {', '.join(cog_commands)}")
+                    else:
+                        self.logger.warning(f"No commands found for cog {cog_name}")
+                else:
+                    self.logger.warning(f"Could not find cog instance for {cog_name}")
+                    self.logger.debug(f"Available cogs: {list(self.cogs.keys())}")
             except Exception as e:
                 self.logger.error(f"Failed to load extension {cog}: {e}", exc_info=True)
 
+        # Log all commands after loading all cogs
+        all_commands = [cmd.name for cmd in self.commands.values() if isinstance(cmd, commands.Command)]
+        self.logger.info(f"All commands after loading all cogs: {', '.join(all_commands)}")
+
+    @commands.command(name="listcommands")
+    async def list_commands(self, ctx: commands.Context):
+        command_list = [cmd.name for cmd in self.commands.values()]
+        await ctx.send(f"Available commands: {', '.join(command_list)}")
 
 def run(self):
     """Run the bot with authentication setup."""

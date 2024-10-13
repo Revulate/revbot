@@ -99,14 +99,19 @@ class Preview(commands.Cog):
                     status = f"LIVE ({self.format_duration(duration)})" if duration else "LIVE"
                     viewers = f"{stream_data.viewer_count:,} viewers"
 
+                    # Use the original thumbnail URL without specifying dimensions
+                    thumbnail_url = stream_data.thumbnail_url.replace('{width}', '').replace('{height}', '')
+
                     response = (
                         f"@{ctx.author.name}, twitch.tv/{user.name} | "
                         f"Status: {status} | "
                         f"Viewers: {viewers} | "
                         f"Category: {channel_info.game_name} | "
                         f"Title: {channel_info.title} | "
-                        f"Preview: {stream_data.thumbnail_url.format(width='320', height='180')}"
+                        f"Preview: {thumbnail_url}"
                     )
+                    self.bot.logger.info(f"Sending preview response for {channel_name}: {response}")
+                    await ctx.send(response)
                 else:
                     status = "OFFLINE"
                     last_live = "Unknown"
@@ -121,8 +126,11 @@ class Preview(commands.Cog):
                         f"Category: {channel_info.game_name} | "
                         f"Title: {channel_info.title}"
                     )
+                    self.bot.logger.info(f"Sending offline preview response for {channel_name}: {response}")
+                    await ctx.send(response)
 
-                await ctx.send(response)
+                self.bot.logger.debug(f"Sent preview info for '{channel_name}' to chat.")
+
                 self.bot.logger.debug(f"Sent preview info for '{channel_name}' to chat.")
                 break
             except Exception as e:
