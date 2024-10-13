@@ -505,7 +505,7 @@ class DnD(commands.Cog):
                 json.dumps(quest.get("requirements", {})),
             ),
         )
-        quest_id = cursor.lastrowid
+        quest_id = cursor.lastrowid  # noqa: F841
         conn.commit()
         conn.close()
 
@@ -752,7 +752,7 @@ class DnD(commands.Cog):
             """,
                 (json.dumps([user_id]), "active"),
             )
-            party_id = cursor.lastrowid
+            party_id = cursor.lastrowid  # noqa: F841
             conn.commit()
             conn.close()
 

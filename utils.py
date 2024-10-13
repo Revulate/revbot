@@ -238,11 +238,11 @@ def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tu
     from dateparser import parse
 
     time_keywords = ["in", "on", "after"]
-    time_keyword = None
+    # time_keyword = None
     time_index = -1
 
     if expect_time_keyword_at_start and args and args[0].lower() in time_keywords:
-        time_keyword = args[0].lower()
+        # time_keyword = args[0].lower()
         time_index = 0
     else:
         message_text = " ".join(args).strip()
@@ -297,14 +297,7 @@ def format_time_delta(delta: timedelta) -> str:
     """
     total_seconds = int(delta.total_seconds())
     periods = [("d", 86400), ("h", 3600), ("m", 60), ("s", 1)]
-    return (
-        " ".join(
-            f"{value}{name}"
-            for name, seconds in periods
-            if (value := total_seconds // seconds) and not (total_seconds := total_seconds % seconds)
-        )
-        or "0s"
-    )
+    return " ".join(f"{value}{name}" for name, seconds in periods if (value := total_seconds // seconds)) or "0s"
 
 
 def format_duration(seconds):
