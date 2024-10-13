@@ -4,7 +4,7 @@ from twitchio.ext import commands
 import os
 from dotenv import load_dotenv
 import aiohttp
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 from fuzzywuzzy import process
 from google.oauth2.service_account import Credentials
@@ -27,6 +27,7 @@ class DVP(commands.Cog):
         self.logger = bot.logger.getChild("dvp")
         self.logger.setLevel(logging.DEBUG)  # Set logger to DEBUG level
         self.update_task = None
+        self.update_recent_games_task = None  # New task for recent games update
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE")
         self.db_initialized = asyncio.Event()
@@ -63,27 +64,27 @@ class DVP(commands.Cog):
         await self.setup_database()
         await self.initialize_data()
         self.update_task = self.bot.loop.create_task(self.periodic_update())
+        self.update_recent_games_task = self.bot.loop.create_task(self.periodic_recent_games_update())
         self.logger.info("DVP cog initialized successfully")
 
     async def cog_unload(self):
         if self.update_task:
             self.update_task.cancel()
+        if self.update_recent_games_task:
+            self.update_recent_games_task.cancel()
 
     async def setup_database(self):
         self.logger.info(f"Setting up database at {self.db_path}")
         try:
             async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("DROP TABLE IF EXISTS games")
-                await db.execute(
-                    """
-                    CREATE TABLE games (
+                await db.execute('''
+                    CREATE TABLE IF NOT EXISTS games (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL UNIQUE,
                         time_played INTEGER NOT NULL,
                         last_played DATE NOT NULL
                     )
-                """
-                )
+                ''')
                 await db.commit()
             self.logger.info("Database setup complete")
         except Exception as e:
@@ -169,6 +170,75 @@ class DVP(commands.Cog):
                 self.logger.info("Initial data scraping completed and data inserted into the database.")
         except Exception as e:
             self.logger.error(f"Error during data scraping: {e}", exc_info=True)
+
+    async def update_recent_games(self):
+        self.logger.info("Updating recent games data from web scraping using Playwright...")
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context()
+                page = await context.new_page()
+
+                await page.goto(f"https://twitchtracker.com/{self.channel_name}/games")
+                await page.wait_for_selector("#games")
+
+                # Select "5" from the dropdown to show only 5 games
+                await page.select_option('select[name="games_length"]', value="5")
+                await asyncio.sleep(5)  # Wait for table to update
+
+                # Extract data from the table
+                rows = await page.query_selector_all("#games tbody tr")
+                self.logger.info(f"Found {len(rows)} rows in the games table for recent update.")
+
+                async with aiosqlite.connect(self.db_path) as db:
+                    for row in rows:
+                        columns = await row.query_selector_all("td")
+                        if len(columns) >= 7:
+                            name = (await columns[1].inner_text()).strip()
+
+                            # Get the 'span' within the time played column
+                            time_played_element = await columns[2].query_selector("span")
+                            if time_played_element:
+                                time_played_str = (await time_played_element.inner_text()).strip()
+                            else:
+                                time_played_str = (await columns[2].inner_text()).strip()
+                            self.logger.debug(f"Scraped time_played_str for '{name}': '{time_played_str}'")
+                            time_played = self.parse_time(time_played_str)
+
+                            last_played_str = (await columns[6].inner_text()).strip()
+                            last_played = datetime.strptime(last_played_str, "%d/%b/%Y").date()
+
+                            # Update or insert the game data
+                            await db.execute(
+                                """
+                                INSERT INTO games (name, time_played, last_played)
+                                VALUES (?, ?, ?)
+                                ON CONFLICT(name) DO UPDATE SET
+                                    time_played = excluded.time_played,
+                                    last_played = excluded.last_played
+                                """,
+                                (name, time_played, last_played),
+                            )
+                    await db.commit()
+
+                await browser.close()
+                self.logger.info("Recent games data updated and data inserted into the database.")
+
+            # Update initials mapping
+            await self.update_initials_mapping()
+        except Exception as e:
+            self.logger.error(f"Error during recent games data update: {e}", exc_info=True)
+
+    async def update_initials_mapping(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT name FROM games") as cursor:
+                games = await cursor.fetchall()
+        self.initials_mapping = {}
+        for game in games:
+            name = game[0]
+            initials = self.generate_initials(name)
+            self.initials_mapping[initials.lower()] = name
+            self.logger.debug(f"Updated initials mapping: '{initials.lower()}' for game '{name}'")
 
     def generate_initials(self, title):
         # Remove any non-alphanumeric characters and replace with space
@@ -264,8 +334,8 @@ class DVP(commands.Cog):
                 INSERT INTO games (name, time_played, last_played)
                 VALUES (?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
-                    time_played = time_played + EXCLUDED.time_played,
-                    last_played = EXCLUDED.last_played
+                    time_played = time_played + excluded.time_played,
+                    last_played = excluded.last_played
             """,
                 (game_name, time_played, datetime.now(timezone.utc).date()),
             )
@@ -540,10 +610,18 @@ class DVP(commands.Cog):
                 current_game = await self.get_channel_games()
                 if current_game:
                     await self.update_game_data(current_game, 5)  # Update every 5 minutes
-                    await self.update_google_sheet()
             except Exception as e:
                 self.logger.error(f"Error during periodic update: {e}", exc_info=True)
             await asyncio.sleep(300)  # Sleep for 5 minutes
+
+    async def periodic_recent_games_update(self):
+        while True:
+            try:
+                await self.update_recent_games()
+                await self.update_google_sheet()
+            except Exception as e:
+                self.logger.error(f"Error during periodic recent games update: {e}", exc_info=True)
+            await asyncio.sleep(86400)  # Sleep for 24 hours
 
     @commands.command(name="dvp")
     async def did_vulpes_play_it(self, ctx: commands.Context, *, game_name: str):
