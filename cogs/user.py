@@ -39,7 +39,7 @@ class User(commands.Cog):
     async def get_ban_info(self, broadcaster_id, user_id):
         """Fetch ban information for a user in a specific broadcaster's channel."""
         try:
-            if hasattr(self.bot, 'fetch_channel_bans'):
+            if hasattr(self.bot, "fetch_channel_bans"):
                 bans = await self.bot.fetch_channel_bans(broadcaster_id, user_ids=[user_id])
                 return bans[0] if bans else None
             else:

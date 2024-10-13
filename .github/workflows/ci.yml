@@ -50,6 +50,8 @@ jobs:
 
     steps:
       - name: Deploy to Raspberry Pi
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           set -e  # Exit immediately if a command exits with a non-zero status
           REVUBOT_DIR=~/revbot
@@ -100,7 +102,15 @@ jobs:
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           WEATHER_API_KEY=${{ secrets.WEATHER_API_KEY }}
           NUULS_API_KEY=${{ secrets.NUULS_API_KEY }}
+          GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_CREDENTIALS_FILE=credentials.json
           EOF
+
+          # Create the credentials.json file from the secret
+          echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
+
+          # Set appropriate permissions for credentials.json
+          chmod 600 credentials.json
 
           # Restart the Twitch bot service
           sudo systemctl restart twitch-bot.service

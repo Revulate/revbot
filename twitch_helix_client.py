@@ -6,6 +6,7 @@ from logger import logger
 import json
 import os
 
+
 class TwitchAPI:
     """Utility class for interacting with the Twitch Helix API."""
 
@@ -40,15 +41,15 @@ class TwitchAPI:
 
     def load_tokens(self):
         """Load tokens from a file."""
-        token_file = 'twitch_tokens.json'
+        token_file = "twitch_tokens.json"
         logger.info(f"Attempting to load tokens from {token_file}")
         try:
             if os.path.exists(token_file):
-                with open(token_file, 'r') as f:
+                with open(token_file, "r") as f:
                     data = json.load(f)
-                    self.oauth_token = data.get('access_token')
-                    self.refresh_token = data.get('refresh_token')
-                    expiry = data.get('expiry')
+                    self.oauth_token = data.get("access_token")
+                    self.refresh_token = data.get("refresh_token")
+                    expiry = data.get("expiry")
                     self.token_expiry = datetime.datetime.fromisoformat(expiry) if expiry else None
                 logger.info("Tokens loaded successfully")
             else:
@@ -60,15 +61,15 @@ class TwitchAPI:
 
     def save_tokens(self):
         """Save tokens to a file."""
-        token_file = 'twitch_tokens.json'
+        token_file = "twitch_tokens.json"
         logger.info(f"Attempting to save tokens to {token_file}")
         data = {
-            'access_token': self.oauth_token,
-            'refresh_token': self.refresh_token,
-            'expiry': self.token_expiry.isoformat() if self.token_expiry else None
+            "access_token": self.oauth_token,
+            "refresh_token": self.refresh_token,
+            "expiry": self.token_expiry.isoformat() if self.token_expiry else None,
         }
         try:
-            with open(token_file, 'w') as f:
+            with open(token_file, "w") as f:
                 json.dump(data, f)
             logger.info("Tokens saved successfully")
         except Exception as e:
@@ -133,21 +134,21 @@ class TwitchAPI:
             logger.error(f"Exception during token refresh: {e}")
             raise
 
-    async def api_request(self, endpoint, params=None, method='GET', data=None):
+    async def api_request(self, endpoint, params=None, method="GET", data=None):
         """Make an API request to Twitch, handling token refresh if needed."""
         await self.ensure_token_valid()
         url = f"{self.BASE_URL}/{endpoint}"
         headers = {
             "Authorization": f"Bearer {self.oauth_token}",
             "Client-ID": self.client_id,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         await self.initialize_session()
         try:
-            if method == 'GET':
+            if method == "GET":
                 async with self.session.get(url, params=params, headers=headers) as response:
                     return await self._handle_response(response)
-            elif method == 'POST':
+            elif method == "POST":
                 async with self.session.post(url, params=params, headers=headers, json=data) as response:
                     return await self._handle_response(response)
             else:

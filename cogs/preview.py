@@ -100,7 +100,7 @@ class Preview(commands.Cog):
                     viewers = f"{stream_data.viewer_count:,} viewers"
 
                     # Use the original thumbnail URL without specifying dimensions
-                    thumbnail_url = stream_data.thumbnail_url.replace('{width}', '').replace('{height}', '')
+                    thumbnail_url = stream_data.thumbnail_url.replace("{width}", "").replace("{height}", "")
 
                     response = (
                         f"@{ctx.author.name}, twitch.tv/{user.name} | "

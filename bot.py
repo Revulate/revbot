@@ -102,7 +102,11 @@ class TwitchBot(commands.Bot):
 
         # Check token status
         self.logger.info(f"Current access token: {self.twitch_api.oauth_token[:10]}...")
-        self.logger.info(f"Current refresh token: {self.twitch_api.refresh_token[:10]}..." if self.twitch_api.refresh_token else "No refresh token")
+        self.logger.info(
+            f"Current refresh token: {self.twitch_api.refresh_token[:10]}..."
+            if self.twitch_api.refresh_token
+            else "No refresh token"
+        )
         self.logger.info(f"Token expiry: {self.twitch_api.token_expiry}")
 
     async def event_channel_joined(self, channel):
@@ -133,8 +137,10 @@ class TwitchBot(commands.Bot):
     async def fetch_example_streams(self):
         try:
             streams = await self.twitch_api.get_streams(["afro", "cohhcarnage"])
-            for stream in streams.get('data', []):
-                self.logger.info(f"Stream found: {stream.get('user_name')} is live with {stream.get('viewer_count')} viewers.")
+            for stream in streams.get("data", []):
+                self.logger.info(
+                    f"Stream found: {stream.get('user_name')} is live with {stream.get('viewer_count')} viewers."
+                )
         except Exception as e:
             self.logger.error(f"Error fetching streams: {e}", exc_info=True)
 
@@ -151,10 +157,7 @@ class TwitchBot(commands.Bot):
                 self.logger.info(f"Current commands after loading {cog_name}: {', '.join(all_commands)}")
 
                 # Get the cog instance using case-insensitive matching
-                cog_instance = next(
-                    (cog for name, cog in self.cogs.items() if name.lower() == cog_name.lower()),
-                    None
-                )
+                cog_instance = next((cog for name, cog in self.cogs.items() if name.lower() == cog_name.lower()), None)
                 if cog_instance:
                     # Get commands associated with the cog
                     cog_commands = [cmd.name for cmd in self.commands.values() if cmd.cog == cog_instance]
@@ -176,6 +179,7 @@ class TwitchBot(commands.Bot):
     async def list_commands(self, ctx: commands.Context):
         command_list = [cmd.name for cmd in self.commands.values()]
         await ctx.send(f"Available commands: {', '.join(command_list)}")
+
 
 def run(self):
     """Run the bot with authentication setup."""
