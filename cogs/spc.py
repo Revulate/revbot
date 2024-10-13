@@ -5,10 +5,8 @@ import asyncio
 import logging
 import aiosqlite
 import aiohttp
-from datetime import datetime, timedelta
 from twitchio.ext import commands
 from rapidfuzz import process, fuzz  # For fuzzy search
-from dotenv import load_dotenv
 
 
 class Spc(commands.Cog):

@@ -13,7 +13,6 @@ import base64
 import aiohttp
 import time
 import backoff
-from dotenv import load_dotenv
 
 SYSTEM_PROMPT = (
     "You are Cortana, an intelligent and strategic AI serving Revulate. "

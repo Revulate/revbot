@@ -3,7 +3,7 @@
 import logging
 import asyncio
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import re
 import aiosqlite
 
@@ -328,7 +328,7 @@ class Remind(commands.Cog):
 
     def is_command(self, message):
         message_content = message.content.strip()
-        pattern = f"^({'|'.join(re.escape(prefix) for prefix in self.prefixes)})(\w+)"
+        pattern = rf"^({'|'.join(re.escape(prefix) for prefix in self.prefixes)})(\w+)"
         match = re.match(pattern, message_content)
         return bool(match)
 

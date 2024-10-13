@@ -21,28 +21,46 @@ jobs:
       # 2. Create and Activate Virtual Environment, then Install Dependencies
       - name: Set up Python Virtual Environment and Install Dependencies
         run: |
-          # Create a virtual environment in the revbot directory if it doesn't exist
-          if [ ! -d "venv" ]; then
+          # Create a virtual environment if it doesn't exist
+          if [ ! -d "venv" ] && [ ! -d "env" ]; then
             python3.11 -m venv venv  # Adjust to python3.10 if necessary
           fi
           
           # Activate the virtual environment
-          source venv/bin/activate
+          if [ -d "venv" ]; then
+            source venv/bin/activate
+          elif [ -d "env" ]; then
+            source env/bin/activate
+          fi
           
           # Upgrade pip inside the virtual environment
           python -m pip install --upgrade pip
 
           # Install the required dependencies inside the virtual environment
           pip install -r requirements.txt
+          
+          # Install black and flake8
+          pip install black flake8
 
       # 3. Run Black Formatter Check
       - name: Run Black Formatter Check
         run: |
-          # Activate the virtual environment
-          source venv/bin/activate
-          
-          # Run Black with the necessary options
+          if [ -d "venv" ]; then
+            source venv/bin/activate
+          elif [ -d "env" ]; then
+            source env/bin/activate
+          fi
           python -m black --check --diff --line-length 120 .
+
+      # 4. Run Flake8
+      - name: Run Flake8
+        run: |
+          if [ -d "venv" ]; then
+            source venv/bin/activate
+          elif [ -d "env" ]; then
+            source env/bin/activate
+          fi
+          python -m flake8 --max-line-length=120 --exclude=venv,env,.git,__pycache__ .
 
   deploy:
     runs-on: self-hosted  # Use the self-hosted runner for deployment too
@@ -71,12 +89,16 @@ jobs:
           fi
 
           # Use the existing virtual environment or create one if necessary
-          if [ ! -d "venv" ]; then
+          if [ ! -d "venv" ] && [ ! -d "env" ]; then
             python3.11 -m venv venv  # Adjust to python3.10 if necessary
           fi
 
           # Activate the virtual environment
-          source venv/bin/activate
+          if [ -d "venv" ]; then
+            source venv/bin/activate
+          elif [ -d "env" ]; then
+            source env/bin/activate
+          fi
 
           # Install dependencies within the virtual environment
           pip install -r requirements.txt
@@ -113,9 +135,6 @@ jobs:
           chmod 600 credentials.json
 
           # Restart the Twitch bot service
-          sudo systemctl restart twitch-bot.service
-          
-          # Add error logging for the restart command
           if ! sudo systemctl restart twitch-bot.service; then
             echo "Error: Failed to restart twitch-bot service"
             echo "Service Status:"
@@ -126,6 +145,13 @@ jobs:
             whoami
             echo "Sudo Permissions:"
             sudo -l
+            exit 1
+          fi
+
+          # Add a simple health check
+          sleep 10  # Give the bot some time to start up
+          if ! systemctl is-active --quiet twitch-bot.service; then
+            echo "Error: twitch-bot service is not running after restart"
             exit 1
           fi
 

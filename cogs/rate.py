@@ -1,6 +1,5 @@
 # rate.py
 import random
-import re
 from twitchio.ext import commands
 from logger import setup_logger  # Import the centralized logger
 from utils import split_message  # Import the shared split_message function

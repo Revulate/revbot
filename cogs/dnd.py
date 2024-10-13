@@ -2,7 +2,6 @@
 
 import random
 import json
-import asyncio
 import logging
 import sqlite3
 from typing import Optional

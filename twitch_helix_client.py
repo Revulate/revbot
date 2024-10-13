@@ -1,6 +1,5 @@
 import aiohttp
 import datetime
-import asyncio
 import base64
 from logger import logger
 import json

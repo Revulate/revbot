@@ -1,4 +1,3 @@
-import os
 from dotenv import load_dotenv
 from twitchio.ext import commands
 from datetime import datetime, timezone

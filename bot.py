@@ -23,7 +23,8 @@ COGS = [
     "cogs.spc",
     "cogs.user",
     "cogs.lastmessage",
-    "cogs.dvp",  # Make sure this line is included
+    "cogs.dvp",
+    "cogs.uptime",
 ]
 
 

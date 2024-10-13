@@ -4,7 +4,6 @@ import aiohttp
 import re
 from twitchio.ext import commands
 from openai import AsyncOpenAI
-from utils import split_message  # Import shared utilities
 
 
 class Create(commands.Cog):

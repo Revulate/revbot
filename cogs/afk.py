@@ -64,7 +64,7 @@ class Afk(commands.Cog):
         username = ctx.author.name
 
         # Extract the command used by parsing the message content with regex
-        pattern = f"^({'|'.join(re.escape(prefix) for prefix in self.prefixes)})(\w+)"
+        pattern = rf"^({'|'.join(re.escape(prefix) for prefix in self.prefixes)})(\w+)"
         match = re.match(pattern, ctx.message.content)
         if not match:
             await ctx.send(f"@{username}, please provide a reason for going AFK.")
@@ -245,7 +245,7 @@ class Afk(commands.Cog):
 
     def is_afk_command(self, message):
         message_content = message.content.strip()
-        pattern = f"^({'|'.join(re.escape(prefix) for prefix in self.prefixes)})(\w+)"
+        pattern = rf"^({'|'.join(re.escape(prefix) for prefix in self.prefixes)})(\w+)"
         match = re.match(pattern, message_content)
         if match:
             command_used = match.group(2).lower()

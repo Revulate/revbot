@@ -2,9 +2,8 @@ import asyncio
 import aiosqlite
 from twitchio.ext import commands
 import os
-from dotenv import load_dotenv
 import aiohttp
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import logging
 from fuzzywuzzy import process
 from google.oauth2.service_account import Credentials
@@ -12,9 +11,6 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from playwright.async_api import async_playwright
 import re
-from unidecode import unidecode
-
-load_dotenv()
 
 
 class DVP(commands.Cog):
