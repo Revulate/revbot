@@ -1,4 +1,5 @@
 # .gitignore
+credentials.json
 
 # Python
 __pycache__/
