@@ -65,7 +65,7 @@ jobs:
           if [ -d ".git" ]; then
             git fetch origin
             git checkout main
-            git pull origin main
+            git reset --hard origin/main
           else
             git clone --branch main $REPO_URL .
           fi
