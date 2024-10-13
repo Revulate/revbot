@@ -149,13 +149,17 @@ class DVP(commands.Cog):
                                 """
                                 INSERT INTO games (name, time_played, last_played)
                                 VALUES (?, ?, ?)
-                            """,
+                                ON CONFLICT(name) DO UPDATE SET
+                                    time_played = excluded.time_played,
+                                    last_played = excluded.last_played
+                                """,
                                 (name, time_played, last_played),
                             )
                     await db.commit()
 
                 await browser.close()
                 self.logger.info("Initial data scraping completed and data inserted into the database.")
+            await self.update_initials_mapping()
         except Exception as e:
             self.logger.error(f"Error during data scraping: {e}", exc_info=True)
 
@@ -183,10 +187,17 @@ class DVP(commands.Cog):
 
     async def process_video_data(self, videos):
         async with aiosqlite.connect(self.db_path) as db:
+            # Clear the streams table to prevent cumulative addition
+            await db.execute("DELETE FROM streams")
+            await db.commit()
+
             for video in videos:
                 video_id = video["id"]
+                game_name = video.get("game_name")
+                if not game_name or game_name.lower() == "unknown":
+                    continue  # Skip videos without a valid game name
+
                 game_id = video.get("game_id", "")
-                game_name = video.get("game_name", "Unknown")
                 created_at = video["created_at"]
                 duration_str = video["duration"]  # e.g., '2h15m42s'
                 duration = self.parse_duration(duration_str)  # Convert to seconds
@@ -340,7 +351,7 @@ class DVP(commands.Cog):
 
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
-                "SELECT name, time_played, last_played FROM games ORDER BY last_played DESC"
+                "SELECT name, time_played, last_played FROM games WHERE name != 'Unknown' ORDER BY last_played DESC"
             ) as cursor:
                 rows = await cursor.fetchall()
 
@@ -357,7 +368,7 @@ class DVP(commands.Cog):
 
             # Format the last played date
             last_played_date = datetime.strptime(str(last_played), "%Y-%m-%d")
-            last_played_formatted = last_played_date.strftime("%B %d, 202Y")
+            last_played_formatted = last_played_date.strftime("%B %d, %Y")
 
             # Prepare the image formula
             img_formula = f'=IMAGE("{game_image_url}")' if game_image_url else ""
