@@ -4,7 +4,7 @@ import base64
 from logger import logger
 import json
 import os
-
+from dotenv import load_dotenv, set_key
 
 class TwitchAPI:
     """Utility class for interacting with the Twitch Helix API."""
@@ -39,6 +39,11 @@ class TwitchAPI:
             await self.session.close()
 
     def load_tokens(self):
+        """Load tokens from file and environment variables."""
+        self._load_tokens_from_file()
+        self._load_tokens_from_env()
+
+    def _load_tokens_from_file(self):
         """Load tokens from a file."""
         token_file = "twitch_tokens.json"
         logger.info(f"Attempting to load tokens from {token_file}")
@@ -50,15 +55,31 @@ class TwitchAPI:
                     self.refresh_token = data.get("refresh_token")
                     expiry = data.get("expiry")
                     self.token_expiry = datetime.datetime.fromisoformat(expiry) if expiry else None
-                logger.info("Tokens loaded successfully")
+                logger.info("Tokens loaded successfully from file")
             else:
                 logger.info(f"Token file {token_file} not found")
         except json.JSONDecodeError:
             logger.error("Error decoding saved tokens. Will authenticate from scratch.")
         except Exception as e:
-            logger.error(f"Unexpected error loading tokens: {e}")
+            logger.error(f"Unexpected error loading tokens from file: {e}")
+
+    def _load_tokens_from_env(self):
+        """Load tokens from environment variables."""
+        load_dotenv()
+        env_access_token = os.getenv("ACCESS_TOKEN")
+        env_refresh_token = os.getenv("REFRESH_TOKEN")
+        if env_access_token:
+            self.oauth_token = env_access_token
+        if env_refresh_token:
+            self.refresh_token = env_refresh_token
+        logger.info("Tokens loaded from environment variables")
 
     def save_tokens(self):
+        """Save tokens to both file and environment variables."""
+        self._save_tokens_to_file()
+        self._save_tokens_to_env()
+
+    def _save_tokens_to_file(self):
         """Save tokens to a file."""
         token_file = "twitch_tokens.json"
         logger.info(f"Attempting to save tokens to {token_file}")
@@ -70,9 +91,19 @@ class TwitchAPI:
         try:
             with open(token_file, "w") as f:
                 json.dump(data, f)
-            logger.info("Tokens saved successfully")
+            logger.info("Tokens saved successfully to file")
         except Exception as e:
-            logger.error(f"Error saving tokens: {e}")
+            logger.error(f"Error saving tokens to file: {e}")
+
+    def _save_tokens_to_env(self):
+        """Save tokens to environment variables."""
+        try:
+            dotenv_file = os.path.join(os.path.dirname(__file__), '.env')
+            set_key(dotenv_file, "ACCESS_TOKEN", self.oauth_token)
+            set_key(dotenv_file, "REFRESH_TOKEN", self.refresh_token)
+            logger.info("Tokens saved successfully to .env file")
+        except Exception as e:
+            logger.error(f"Error saving tokens to .env file: {e}")
 
     async def ensure_token_valid(self):
         """Ensure the OAuth token is valid, refreshing if necessary."""
