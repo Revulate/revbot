@@ -12,7 +12,6 @@ from googleapiclient.errors import HttpError
 from playwright.async_api import async_playwright
 import re
 
-
 class DVP(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -21,38 +20,33 @@ class DVP(commands.Cog):
         self.client_id = os.getenv("TWITCH_CLIENT_ID")
         self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
         self.logger = bot.logger.getChild("dvp")
-        self.logger.setLevel(logging.DEBUG)  # Set logger to DEBUG level
+        self.logger.setLevel(logging.DEBUG)
         self.update_task = None
-        self.update_recent_games_task = None  # New task for recent games update
+        self.update_recent_games_task = None
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE")
         self.db_initialized = asyncio.Event()
 
-        # Validate environment variables
         if not self.sheet_id:
             raise ValueError("GOOGLE_SHEET_ID is not set in the environment variables")
         if not self.creds_file:
             raise ValueError("GOOGLE_CREDENTIALS_FILE is not set in the environment variables")
 
-        # Add known abbreviations
         self.abbreviation_mapping = {
             "ff7": "FINAL FANTASY VII REMAKE",
             "ff16": "FINAL FANTASY XVI",
             "ffxvi": "FINAL FANTASY XVI",
+            "ff14": "FINAL FANTASY XVI",
             "rdr2": "Red Dead Redemption 2",
             "er": "ELDEN RING",
             "ds3": "DARK SOULS III",
             "gow": "God of War",
-            # Add more known abbreviations as needed
         }
 
-        # Set the sheet URL
         self.sheet_url = os.getenv("GOOGLE_SHEET_URL")
         if not self.sheet_url:
-            # Construct the URL using the sheet ID
             self.sheet_url = f"https://docs.google.com/spreadsheets/d/{self.sheet_id}/edit?usp=sharing"
 
-        # Start the initialization
         self.bot.loop.create_task(self.initialize_cog())
 
     async def initialize_cog(self):
@@ -98,14 +92,12 @@ class DVP(commands.Cog):
             if not games:
                 self.logger.info("No data found in the database. Starting scraping.")
                 await self.scrape_initial_data()
-                # Fetch the game names again after scraping
                 async with aiosqlite.connect(self.db_path) as db:
                     async with db.execute("SELECT name FROM games") as cursor:
                         games = await cursor.fetchall()
             else:
                 self.logger.info("Data already exists. Skipping scraping.")
 
-            # Generate initials mapping
             self.initials_mapping = {}
             for game in games:
                 name = game[0]
@@ -117,7 +109,7 @@ class DVP(commands.Cog):
             self.logger.info("Data initialization completed successfully.")
         except Exception as e:
             self.logger.error(f"Error initializing data: {e}", exc_info=True)
-            self.db_initialized.set()  # Ensure the event is set to prevent hanging
+            self.db_initialized.set()
 
     async def scrape_initial_data(self):
         self.logger.info("Initializing data from web scraping using Playwright...")
@@ -130,11 +122,9 @@ class DVP(commands.Cog):
                 await page.goto(f"https://twitchtracker.com/{self.channel_name}/games")
                 await page.wait_for_selector("#games")
 
-                # Select "All" from the dropdown to show all games
                 await page.select_option('select[name="games_length"]', value="-1")
-                await asyncio.sleep(5)  # Wait for table to update
+                await asyncio.sleep(5)
 
-                # Extract data from the table
                 rows = await page.query_selector_all("#games tbody tr")
                 self.logger.info(f"Found {len(rows)} rows in the games table.")
 
@@ -144,14 +134,13 @@ class DVP(commands.Cog):
                         if len(columns) >= 7:
                             name = (await columns[1].inner_text()).strip()
 
-                            # Get the 'span' within the time played column
                             time_played_element = await columns[2].query_selector("span")
                             if time_played_element:
                                 time_played_str = (await time_played_element.inner_text()).strip()
                             else:
                                 time_played_str = (await columns[2].inner_text()).strip()
                             self.logger.debug(f"Scraped time_played_str for '{name}': '{time_played_str}'")
-                            time_played = self.parse_time(time_played_str)
+                            time_played_str, time_played = self.parse_time(time_played_str)
 
                             last_played_str = (await columns[6].inner_text()).strip()
                             last_played = datetime.strptime(last_played_str, "%d/%b/%Y").date()
@@ -178,13 +167,17 @@ class DVP(commands.Cog):
                 page = await context.new_page()
 
                 await page.goto(f"https://twitchtracker.com/{self.channel_name}/games")
-                await page.wait_for_selector("#games")
+                await page.wait_for_load_state('networkidle')
+                await page.wait_for_selector("#games", state="visible", timeout=60000)
 
-                # Select "5" from the dropdown to show only 5 games
-                await page.select_option('select[name="games_length"]', value="5")
-                await asyncio.sleep(5)  # Wait for table to update
+                select_element = await page.wait_for_selector('select[name="games_length"]', state="visible", timeout=60000)
+                
+                try:
+                    await select_element.select_option(value="5")
+                    await page.wait_for_load_state('networkidle')
+                except Exception as e:
+                    self.logger.warning(f"Failed to select option: {e}")
 
-                # Extract data from the table
                 rows = await page.query_selector_all("#games tbody tr")
                 self.logger.info(f"Found {len(rows)} rows in the games table for recent update.")
 
@@ -194,19 +187,18 @@ class DVP(commands.Cog):
                         if len(columns) >= 7:
                             name = (await columns[1].inner_text()).strip()
 
-                            # Get the 'span' within the time played column
                             time_played_element = await columns[2].query_selector("span")
                             if time_played_element:
                                 time_played_str = (await time_played_element.inner_text()).strip()
                             else:
                                 time_played_str = (await columns[2].inner_text()).strip()
                             self.logger.debug(f"Scraped time_played_str for '{name}': '{time_played_str}'")
-                            time_played = self.parse_time(time_played_str)
+                            time_played_str, time_played = self.parse_time(time_played_str)
+                            self.logger.info(f"Parsed time for '{name}': {time_played_str}")
 
                             last_played_str = (await columns[6].inner_text()).strip()
                             last_played = datetime.strptime(last_played_str, "%d/%b/%Y").date()
 
-                            # Update or insert the game data
                             await db.execute(
                                 """
                                 INSERT INTO games (name, time_played, last_played)
@@ -222,7 +214,6 @@ class DVP(commands.Cog):
                 await browser.close()
                 self.logger.info("Recent games data updated and data inserted into the database.")
 
-            # Update initials mapping
             await self.update_initials_mapping()
         except Exception as e:
             self.logger.error(f"Error during recent games data update: {e}", exc_info=True)
@@ -239,9 +230,7 @@ class DVP(commands.Cog):
             self.logger.debug(f"Updated initials mapping: '{initials.lower()}' for game '{name}'")
 
     def generate_initials(self, title):
-        # Remove any non-alphanumeric characters and replace with space
         title_cleaned = re.sub(r"[^A-Za-z0-9 ]+", "", title)
-        # Split the title into words
         words = title_cleaned.strip().split()
         initials_list = []
         for word in words:
@@ -277,22 +266,18 @@ class DVP(commands.Cog):
         total_minutes = 0
         time_str = time_str.replace(",", "").strip()
         try:
-            # Try to parse as a float directly (assuming hours)
-            value = float(time_str)
-            total_minutes = value * 60
-            self.logger.debug(f"Parsed '{time_str}' as {total_minutes} minutes (assumed hours).")
-        except ValueError:
-            # If that fails, parse as 'number unit' pairs
-            parts = time_str.split()
-            i = 0
-            while i < len(parts):
-                try:
+            if '.' in time_str:
+                hours = float(time_str)
+                total_minutes = int(hours * 60)
+            else:
+                parts = time_str.split()
+                i = 0
+                while i < len(parts):
                     value = float(parts[i])
                     if i + 1 < len(parts):
                         unit = parts[i + 1].rstrip("s").lower()
                         i += 2
                     else:
-                        # If no unit, default to hours
                         unit = "hour"
                         i += 1
                     if unit == "day":
@@ -303,10 +288,20 @@ class DVP(commands.Cog):
                         total_minutes += value
                     else:
                         self.logger.error(f"Unknown time unit '{unit}' in time string '{time_str}'")
-                except (ValueError, IndexError) as e:
-                    self.logger.error(f"Error parsing time string '{time_str}': {e}", exc_info=True)
-                    break
-        return int(total_minutes)
+        except Exception as e:
+            self.logger.error(f"Error parsing time string '{time_str}': {e}", exc_info=True)
+        
+        days, remaining_minutes = divmod(total_minutes, 24 * 60)
+        hours, minutes = divmod(remaining_minutes, 60)
+        
+        if days > 0:
+            time_str = f"{int(days)}d {int(hours)}h {int(minutes)}m ({int(total_minutes / 60)} hours)"
+        elif hours > 0:
+            time_str = f"{int(hours)}h {int(minutes)}m"
+        else:
+            time_str = f"{int(minutes)}m"
+        
+        return time_str, total_minutes
 
     async def get_channel_games(self):
         user_id = await self.get_user_id(self.channel_name)
@@ -634,9 +629,7 @@ class DVP(commands.Cog):
             # Check if the input matches any known abbreviations
             if game_name_normalized in self.abbreviation_mapping:
                 game_name_to_search = self.abbreviation_mapping[game_name_normalized]
-                self.logger.debug(
-                    f"Input '{game_name_normalized}' matched to abbreviation mapping '{game_name_to_search}'"
-                )
+                self.logger.debug(f"Input '{game_name_normalized}' matched to abbreviation mapping '{game_name_to_search}'")
             elif input_initials in self.initials_mapping:
                 game_name_to_search = self.initials_mapping[input_initials]
                 self.logger.debug(f"Initials '{input_initials}' matched to '{game_name_to_search}'")
@@ -651,7 +644,7 @@ class DVP(commands.Cog):
                     game_name_to_search = match[0]
                     self.logger.debug(f"Fuzzy matched '{game_name_normalized}' to '{game_name_to_search}'")
                 else:
-                    self.logger.warning("No matches found using fuzzy matching.")
+                    self.logger.warning(f"No matches found for '{game_name}' using fuzzy matching.")
                     await ctx.send(f"@{ctx.author.name}, no games found matching '{game_name}'.")
                     return
 

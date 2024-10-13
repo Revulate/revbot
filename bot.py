@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from logger import logger
 from utils import CustomContext
 from twitch_helix_client import TwitchAPI
+import aiohttp
 
 # Load environment variables
 load_dotenv()
@@ -27,16 +28,15 @@ COGS = [
     "cogs.uptime",
 ]
 
-
 class TwitchBot(commands.Bot):
-    def __init__(self):
+    def __init__(self, loop):
         self.logger = logger
 
         # Use environment variables
-        token = os.getenv("ACCESS_TOKEN")
-        client_id = os.getenv("TWITCH_CLIENT_ID")
-        client_secret = os.getenv("TWITCH_CLIENT_SECRET")
-        refresh_token = os.getenv("REFRESH_TOKEN")
+        self.token = os.getenv("ACCESS_TOKEN")
+        self.client_id = os.getenv("TWITCH_CLIENT_ID")
+        self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+        self.refresh_token = os.getenv("REFRESH_TOKEN")
         nick = os.getenv("BOT_NICK")
         prefix = os.getenv("COMMAND_PREFIX", "#")
         channels = os.getenv("TWITCH_CHANNELS", "").split(",")
@@ -45,21 +45,59 @@ class TwitchBot(commands.Bot):
         self._check_env_variables()
 
         super().__init__(
-            token=token,
-            client_id=client_id,
+            token=self.token,
+            client_id=self.client_id,
             nick=nick,
             prefix=prefix,
             initial_channels=[channel.strip() for channel in channels if channel.strip()],
+            loop=loop
         )
-        self.client_secret = client_secret
         self.broadcaster_user_id = os.getenv("BROADCASTER_USER_ID")
         self.bot_user_id = None
         self.context_class = CustomContext
 
         # Initialize TwitchAPI
-        self.twitch_api = TwitchAPI(client_id, client_secret, token, refresh_token)
+        redirect_uri = "http://localhost:3000"  # or whatever you used during authentication
+        self.twitch_api = TwitchAPI(self.client_id, self.client_secret, redirect_uri)
+        self.twitch_api.oauth_token = self.token
+        self.twitch_api.refresh_token = self.refresh_token
         self.twitch_api.save_tokens()  # Explicitly save tokens after initialization
         self.logger.info("TwitchAPI instance created and tokens saved")
+
+    async def refresh_token(self):
+        self.logger.info("Refreshing access token...")
+        success = await self.twitch_api.refresh_oauth_token()
+        if success:
+            self.token = self.twitch_api.oauth_token
+            self._connection._token = self.token  # Update the token in the connection object
+            self.logger.info("Access token refreshed successfully")
+        else:
+            self.logger.error("Failed to refresh access token")
+        return success
+
+    async def event_ready(self):
+        self.logger.info(f"Logged in as | {self.nick}")
+        await self.fetch_user_id()
+        await self.fetch_example_streams()
+        self.load_modules()
+
+    async def run(self):
+        """Run the bot with authentication setup and error handling."""
+        while True:
+            try:
+                await self.start()
+            except AuthenticationError as e:
+                self.logger.error(f"Authentication Error: {e}. Attempting to refresh token...")
+                if await self.refresh_token():
+                    continue
+                else:
+                    self.logger.error("Failed to refresh token. Exiting...")
+                    break
+            except Exception as e:
+                self.logger.error(f"An unexpected error occurred: {e}", exc_info=True)
+                await asyncio.sleep(60)  # Wait before attempting to restart
+            else:
+                break  # If no exception occurs, break the loop
 
     def _check_env_variables(self):
         """Check for missing critical environment variables."""
@@ -181,24 +219,14 @@ class TwitchBot(commands.Bot):
         command_list = [cmd.name for cmd in self.commands.values()]
         await ctx.send(f"Available commands: {', '.join(command_list)}")
 
-
-def run(self):
-    """Run the bot with authentication setup."""
-    self.loop.run_until_complete(self.setup_auth())
-    super().run()
-
-
-def main():
-    try:
-        bot = TwitchBot()
-        bot.run()
-    except ValueError as e:
-        logger.error(f"Bot initialization failed: {e}")
-    except AuthenticationError as e:
-        logger.error(f"Authentication Error: {e}. Please check your ACCESS_TOKEN.")
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}", exc_info=True)
-
+async def main():
+    loop = asyncio.get_event_loop()
+    bot = TwitchBot(loop)
+    
+    # Create a persistent aiohttp ClientSession
+    async with aiohttp.ClientSession() as session:
+        bot._http.session = session
+        await bot.run()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
