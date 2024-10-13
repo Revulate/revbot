@@ -77,14 +77,16 @@ class DVP(commands.Cog):
         self.logger.info(f"Setting up database at {self.db_path}")
         try:
             async with aiosqlite.connect(self.db_path) as db:
-                await db.execute('''
+                await db.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS games (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL UNIQUE,
                         time_played INTEGER NOT NULL,
                         last_played DATE NOT NULL
                     )
-                ''')
+                """
+                )
                 await db.commit()
             self.logger.info("Database setup complete")
         except Exception as e:
