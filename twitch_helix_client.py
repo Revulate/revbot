@@ -6,6 +6,7 @@ import json
 import os
 from dotenv import load_dotenv, set_key
 
+
 class TwitchAPI:
     """Utility class for interacting with the Twitch Helix API."""
 
@@ -98,7 +99,7 @@ class TwitchAPI:
     def _save_tokens_to_env(self):
         """Save tokens to environment variables."""
         try:
-            dotenv_file = os.path.join(os.path.dirname(__file__), '.env')
+            dotenv_file = os.path.join(os.path.dirname(__file__), ".env")
             set_key(dotenv_file, "ACCESS_TOKEN", self.oauth_token)
             set_key(dotenv_file, "REFRESH_TOKEN", self.refresh_token)
             logger.info("Tokens saved successfully to .env file")
