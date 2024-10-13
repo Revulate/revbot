@@ -9,6 +9,7 @@ import random
 import urllib.parse
 from dotenv import load_dotenv, set_key
 
+
 class TwitchAPI:
     TOKEN_URL = "https://id.twitch.tv/oauth2/token"
     BASE_URL = "https://api.twitch.tv/helix"
@@ -47,13 +48,13 @@ class TwitchAPI:
         set_key(dotenv_file, "TOKEN_EXPIRY", self.token_expiry.isoformat() if self.token_expiry else "")
 
     async def get_authorization_url(self, scopes):
-        state = base64.urlsafe_b64encode(os.urandom(30)).decode('utf-8')
+        state = base64.urlsafe_b64encode(os.urandom(30)).decode("utf-8")
         params = {
             "client_id": self.client_id,
             "redirect_uri": self.redirect_uri,
             "response_type": "code",
             "scope": " ".join(scopes),
-            "state": state
+            "state": state,
         }
         return f"{self.AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
@@ -63,7 +64,7 @@ class TwitchAPI:
             "client_secret": self.client_secret,
             "code": code,
             "grant_type": "authorization_code",
-            "redirect_uri": self.redirect_uri
+            "redirect_uri": self.redirect_uri,
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(self.TOKEN_URL, data=params) as response:
@@ -87,7 +88,7 @@ class TwitchAPI:
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "grant_type": "refresh_token",
-            "refresh_token": self.refresh_token
+            "refresh_token": self.refresh_token,
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(self.TOKEN_URL, data=params) as response:
@@ -155,10 +156,7 @@ class TwitchAPI:
         return await self.api_request("users", params=params)
 
     async def start_device_auth_flow(self, scopes):
-        params = {
-            "client_id": self.client_id,
-            "scopes": " ".join(scopes)
-        }
+        params = {"client_id": self.client_id, "scopes": " ".join(scopes)}
         async with aiohttp.ClientSession() as session:
             async with session.post(self.DEVICE_CODE_URL, data=params) as response:
                 if response.status == 200:
@@ -171,7 +169,7 @@ class TwitchAPI:
         params = {
             "client_id": self.client_id,
             "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         }
         end_time = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
         while datetime.datetime.now() < end_time:

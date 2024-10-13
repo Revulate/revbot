@@ -8,6 +8,7 @@ from rapidfuzz import process, fuzz
 import time
 from collections import OrderedDict
 
+
 class Spc(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -41,21 +42,23 @@ class Spc(commands.Cog):
     async def _setup_database(self):
         async with aiosqlite.connect(self.db_path) as db:
             # Create the table if it doesn't exist
-            await db.execute("""
+            await db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS Steam_Game (
                     ID INTEGER PRIMARY KEY,
                     Name TEXT NOT NULL
                 )
-            """)
-            
+            """
+            )
+
             # Check if LastUpdated column exists, if not, add it
             cursor = await db.execute("PRAGMA table_info(Steam_Game)")
             columns = await cursor.fetchall()
             column_names = [column[1] for column in columns]
-            
+
             if "LastUpdated" not in column_names:
                 await db.execute("ALTER TABLE Steam_Game ADD COLUMN LastUpdated INTEGER")
-            
+
             # Create index if it doesn't exist
             await db.execute("CREATE INDEX IF NOT EXISTS idx_name ON Steam_Game(Name)")
             await db.commit()
@@ -102,12 +105,11 @@ class Spc(commands.Cog):
                         if has_last_updated:
                             await db.execute(
                                 "INSERT OR REPLACE INTO Steam_Game (ID, Name, LastUpdated) VALUES (?, ?, ?)",
-                                (app_id, name, current_time)
+                                (app_id, name, current_time),
                             )
                         else:
                             await db.execute(
-                                "INSERT OR REPLACE INTO Steam_Game (ID, Name) VALUES (?, ?)",
-                                (app_id, name)
+                                "INSERT OR REPLACE INTO Steam_Game (ID, Name) VALUES (?, ?)", (app_id, name)
                             )
                 await db.commit()
                 self.logger.info("Steam games data updated successfully.")
@@ -266,9 +268,7 @@ class Spc(commands.Cog):
         params = {"appid": app_id, "key": self.steam_api_key}
         try:
             async with self.session.get(
-                "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/",
-                params=params,
-                timeout=10
+                "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", params=params, timeout=10
             ) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch player count for App ID {app_id}: {response.status}")
@@ -326,9 +326,7 @@ class Spc(commands.Cog):
         params = {"appids": app_id}
         try:
             async with self.session.get(
-                "https://store.steampowered.com/api/appdetails",
-                params=params,
-                timeout=10
+                "https://store.steampowered.com/api/appdetails", params=params, timeout=10
             ) as response:
                 if response.status != 200:
                     self.logger.error(f"Failed to fetch game details for App ID {app_id}: {response.status}")
@@ -340,7 +338,7 @@ class Spc(commands.Cog):
                     return None
                 developers = game_data.get("developers", [])
                 details = {"name": game_data.get("name", "Unknown"), "developers": developers}
-                
+
                 self.game_details_cache[app_id] = (details, time.time())
                 if len(self.game_details_cache) > self.MAX_CACHE_SIZE:
                     self.game_details_cache.popitem(last=False)
@@ -348,6 +346,7 @@ class Spc(commands.Cog):
         except Exception as e:
             self.logger.error(f"Exception during game details fetch: {e}", exc_info=True)
             return None
+
 
 def prepare(bot):
     bot.add_cog(Spc(bot))

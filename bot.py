@@ -28,6 +28,7 @@ COGS = [
     "cogs.uptime",
 ]
 
+
 class TwitchBot(commands.Bot):
     def __init__(self, loop):
         self.logger = logger
@@ -50,7 +51,7 @@ class TwitchBot(commands.Bot):
             nick=nick,
             prefix=prefix,
             initial_channels=[channel.strip() for channel in channels if channel.strip()],
-            loop=loop
+            loop=loop,
         )
         self.broadcaster_user_id = os.getenv("BROADCASTER_USER_ID")
         self.bot_user_id = None
@@ -80,6 +81,22 @@ class TwitchBot(commands.Bot):
         await self.fetch_user_id()
         await self.fetch_example_streams()
         self.load_modules()
+
+        # Test API call
+        try:
+            user_info = await self.twitch_api.get_users([self.nick])
+            self.logger.info(f"Successfully fetched user info: {user_info}")
+        except Exception as e:
+            self.logger.error(f"Error fetching user info: {e}")
+
+        # Check token status
+        self.logger.info(f"Current access token: {self.twitch_api.oauth_token[:10]}...")
+        self.logger.info(
+            f"Current refresh token: {self.twitch_api.refresh_token[:10]}..."
+            if self.twitch_api.refresh_token
+            else "No refresh token"
+        )
+        self.logger.info(f"Token expiry: {self.twitch_api.token_expiry}")
 
     async def run(self):
         """Run the bot with authentication setup and error handling."""
@@ -125,28 +142,6 @@ class TwitchBot(commands.Bot):
                     await asyncio.sleep(5)
             else:
                 raise ValueError("Failed to create authorization flow.")
-
-    async def event_ready(self):
-        self.logger.info(f"Logged in as | {self.nick}")
-        await self.fetch_user_id()
-        await self.fetch_example_streams()
-        self.load_modules()
-
-        # Test API call
-        try:
-            user_info = await self.twitch_api.get_users([self.nick])
-            self.logger.info(f"Successfully fetched user info: {user_info}")
-        except Exception as e:
-            self.logger.error(f"Error fetching user info: {e}")
-
-        # Check token status
-        self.logger.info(f"Current access token: {self.twitch_api.oauth_token[:10]}...")
-        self.logger.info(
-            f"Current refresh token: {self.twitch_api.refresh_token[:10]}..."
-            if self.twitch_api.refresh_token
-            else "No refresh token"
-        )
-        self.logger.info(f"Token expiry: {self.twitch_api.token_expiry}")
 
     async def event_channel_joined(self, channel):
         self.logger.info(f"Joined channel: {channel.name}")
@@ -219,14 +214,16 @@ class TwitchBot(commands.Bot):
         command_list = [cmd.name for cmd in self.commands.values()]
         await ctx.send(f"Available commands: {', '.join(command_list)}")
 
+
 async def main():
     loop = asyncio.get_event_loop()
     bot = TwitchBot(loop)
-    
+
     # Create a persistent aiohttp ClientSession
     async with aiohttp.ClientSession() as session:
         bot._http.session = session
         await bot.run()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
