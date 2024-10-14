@@ -37,7 +37,7 @@ class TwitchBot(commands.Bot):
         self.token = os.getenv("ACCESS_TOKEN")
         self.client_id = os.getenv("TWITCH_CLIENT_ID")
         self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
-        self.refresh_token = os.getenv("REFRESH_TOKEN")
+        self.refresh_token_string = os.getenv("REFRESH_TOKEN")
         nick = os.getenv("BOT_NICK")
         prefix = os.getenv("COMMAND_PREFIX", "#")
         channels = os.getenv("TWITCH_CHANNELS", "").split(",")
@@ -61,7 +61,7 @@ class TwitchBot(commands.Bot):
         redirect_uri = "http://localhost:3000"  # or whatever you used during authentication
         self.twitch_api = TwitchAPI(self.client_id, self.client_secret, redirect_uri)
         self.twitch_api.oauth_token = self.token
-        self.twitch_api.refresh_token = self.refresh_token
+        self.twitch_api.refresh_token = self.refresh_token_string
         self.twitch_api.save_tokens()  # Explicitly save tokens after initialization
         self.logger.info("TwitchAPI instance created and tokens saved")
 
@@ -70,7 +70,8 @@ class TwitchBot(commands.Bot):
         success = await self.twitch_api.refresh_oauth_token()
         if success:
             self.token = self.twitch_api.oauth_token
-            self._connection._token = self.token  # Update the token in the connection object
+            self.refresh_token_string = self.twitch_api.refresh_token  # Update this line
+            self._connection._token = self.token
             self.logger.info("Access token refreshed successfully")
         else:
             self.logger.error("Failed to refresh access token")
