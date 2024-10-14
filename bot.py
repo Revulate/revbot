@@ -26,6 +26,7 @@ COGS = [
     "cogs.lastmessage",
     "cogs.dvp",
     "cogs.uptime",
+    "cogs.stats",
 ]
 
 
