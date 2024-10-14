@@ -56,21 +56,26 @@ class TwitchBot(commands.Bot):
         self.broadcaster_user_id = os.getenv("BROADCASTER_USER_ID")
         self.bot_user_id = None
         self.context_class = CustomContext
+        self.http_session = None
 
         # Initialize TwitchAPI
         redirect_uri = "http://localhost:3000"  # or whatever you used during authentication
         self.twitch_api = TwitchAPI(self.client_id, self.client_secret, redirect_uri)
         self.twitch_api.oauth_token = self.token
         self.twitch_api.refresh_token = self.refresh_token_string
-        self.twitch_api.save_tokens()  # Explicitly save tokens after initialization
         self.logger.info("TwitchAPI instance created and tokens saved")
+
+    async def create_session(self):
+        if self.http_session is None or self.http_session.closed:
+            self.http_session = aiohttp.ClientSession()
+        self.twitch_api.session = self.http_session
 
     async def refresh_token(self):
         self.logger.info("Refreshing access token...")
         success = await self.twitch_api.refresh_oauth_token()
         if success:
             self.token = self.twitch_api.oauth_token
-            self.refresh_token_string = self.twitch_api.refresh_token  # Update this line
+            self.refresh_token_string = self.twitch_api.refresh_token
             self._connection._token = self.token
             self.logger.info("Access token refreshed successfully")
         else:
@@ -101,22 +106,27 @@ class TwitchBot(commands.Bot):
 
     async def run(self):
         """Run the bot with authentication setup and error handling."""
-        while True:
-            try:
-                await self.start()
-            except AuthenticationError as e:
-                self.logger.error(f"Authentication Error: {e}. Attempting to refresh token...")
-                self.logger.debug(f"Type of self.refresh_token: {type(self.refresh_token)}")  # Add this line
-                if await self.refresh_token():
-                    continue
+        try:
+            await self.create_session()
+            while True:
+                try:
+                    await self.start()
+                except AuthenticationError as e:
+                    self.logger.error(f"Authentication Error: {e}. Attempting to refresh token...")
+                    self.logger.debug(f"Type of self.refresh_token: {type(self.refresh_token)}")
+                    if await self.refresh_token():
+                        continue
+                    else:
+                        self.logger.error("Failed to refresh token. Exiting...")
+                        break
+                except Exception as e:
+                    self.logger.error(f"An unexpected error occurred: {e}", exc_info=True)
+                    await asyncio.sleep(60)  # Wait before attempting to restart
                 else:
-                    self.logger.error("Failed to refresh token. Exiting...")
-                    break
-            except Exception as e:
-                self.logger.error(f"An unexpected error occurred: {e}", exc_info=True)
-                await asyncio.sleep(60)  # Wait before attempting to restart
-            else:
-                break  # If no exception occurs, break the loop
+                    break  # If no exception occurs, break the loop
+        finally:
+            if self.http_session:
+                await self.http_session.close()
 
     def _check_env_variables(self):
         """Check for missing critical environment variables."""
@@ -220,11 +230,7 @@ class TwitchBot(commands.Bot):
 async def main():
     loop = asyncio.get_event_loop()
     bot = TwitchBot(loop)
-
-    # Create a persistent aiohttp ClientSession
-    async with aiohttp.ClientSession() as session:
-        bot._http.session = session
-        await bot.run()
+    await bot.run()
 
 
 if __name__ == "__main__":
