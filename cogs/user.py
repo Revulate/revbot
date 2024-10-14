@@ -3,6 +3,7 @@ from twitchio.ext import commands
 from datetime import datetime, timezone
 import aiosqlite
 
+
 class Stats(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -11,7 +12,8 @@ class Stats(commands.Cog):
 
     async def setup_database(self):
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute('''
+            await db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS user_stats (
                     user_id TEXT PRIMARY KEY,
                     username TEXT,
@@ -19,7 +21,8 @@ class Stats(commands.Cog):
                     first_seen TIMESTAMP,
                     last_seen TIMESTAMP
                 )
-            ''')
+            """
+            )
             await db.commit()
 
     @commands.Cog.event()
@@ -32,13 +35,16 @@ class Stats(commands.Cog):
         current_time = datetime.now(timezone.utc)
 
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute('''
+            await db.execute(
+                """
                 INSERT INTO user_stats (user_id, username, message_count, first_seen, last_seen)
                 VALUES (?, ?, 1, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     message_count = message_count + 1,
                     last_seen = ?
-            ''', (user_id, username, current_time, current_time, current_time))
+            """,
+                (user_id, username, current_time, current_time, current_time),
+            )
             await db.commit()
 
     @commands.command(name="stats")
@@ -64,18 +70,20 @@ class Stats(commands.Cog):
 
         # Fetch user stats from our database
         async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute('SELECT message_count, first_seen, last_seen FROM user_stats WHERE user_id = ?', (user_id,)) as cursor:
+            async with db.execute(
+                "SELECT message_count, first_seen, last_seen FROM user_stats WHERE user_id = ?", (user_id,)
+            ) as cursor:
                 db_stats = await cursor.fetchone()
 
         # Prepare stats message
         stats = []
         stats.append(f"Stats for {user.display_name} (ID: {user.id}):")
         stats.append(f"Account created: {self.format_time_ago(user.created_at)}")
-        
+
         if channel_info and channel_info.game_name:
             stats.append(f"Current game: {channel_info.game_name}")
-        
-        if channel_info and hasattr(channel_info, 'language'):
+
+        if channel_info and hasattr(channel_info, "language"):
             stats.append(f"Language: {channel_info.language}")
 
         if db_stats:
@@ -99,8 +107,8 @@ class Stats(commands.Cog):
 
     def format_time_ago(self, timestamp):
         if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp.rstrip('Z')).replace(tzinfo=timezone.utc)
-        
+            timestamp = datetime.fromisoformat(timestamp.rstrip("Z")).replace(tzinfo=timezone.utc)
+
         now = datetime.now(timezone.utc)
         delta = now - timestamp
 
@@ -120,6 +128,7 @@ class Stats(commands.Cog):
             return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
         else:
             return f"{delta.seconds} second{'s' if delta.seconds != 1 else ''} ago"
+
 
 def prepare(bot):
     bot.add_cog(Stats(bot))
