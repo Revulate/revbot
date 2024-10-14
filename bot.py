@@ -105,6 +105,7 @@ class TwitchBot(commands.Bot):
                 await self.start()
             except AuthenticationError as e:
                 self.logger.error(f"Authentication Error: {e}. Attempting to refresh token...")
+                self.logger.debug(f"Type of self.refresh_token: {type(self.refresh_token)}")  # Add this line
                 if await self.refresh_token():
                     continue
                 else:
