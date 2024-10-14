@@ -1,9 +1,11 @@
 import os
 import asyncio
 import random
+import json
+from datetime import datetime, timedelta
 from twitchio.ext import commands
 from twitchio import AuthenticationError
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from logger import logger
 from utils import CustomContext
 from twitch_helix_client import TwitchAPI
@@ -58,6 +60,8 @@ class TwitchBot(commands.Bot):
         self.bot_user_id = None
         self.context_class = CustomContext
         self.http_session = None
+        self.token_check_task = None
+        self.token_file = "twitch_tokens.json"
 
         # Initialize TwitchAPI
         redirect_uri = "http://localhost:3000"  # or whatever you used during authentication
@@ -66,10 +70,24 @@ class TwitchBot(commands.Bot):
         self.twitch_api.refresh_token = self.refresh_token_string
         self.logger.info("TwitchAPI instance created and tokens saved")
 
-    async def create_session(self):
-        if self.http_session is None or self.http_session.closed:
-            self.http_session = aiohttp.ClientSession()
-        self.twitch_api.session = self.http_session
+    async def start(self):
+        self.token_check_task = self.loop.create_task(self.check_token_regularly())
+        await super().start()
+
+    async def close(self):
+        if self.token_check_task:
+            self.token_check_task.cancel()
+        await super().close()
+
+    async def check_token_regularly(self):
+        while True:
+            await self.ensure_valid_token()
+            await asyncio.sleep(3600)  # Check every hour
+
+    async def ensure_valid_token(self):
+        if not self.twitch_api.token_expiry or datetime.now() >= self.twitch_api.token_expiry - timedelta(minutes=10):
+            self.logger.info("Token expired or close to expiry. Refreshing...")
+            await self.refresh_token()
 
     async def refresh_token(self):
         self.logger.info("Refreshing access token...")
@@ -79,12 +97,43 @@ class TwitchBot(commands.Bot):
             self.refresh_token_string = self.twitch_api.refresh_token
             self._connection._token = self.token
             self.logger.info("Access token refreshed successfully")
+
+            # Update .env file
+            set_key(".env", "ACCESS_TOKEN", self.token)
+            set_key(".env", "REFRESH_TOKEN", self.refresh_token_string)
+
+            # Update JSON file
+            self.update_token_file()
+
+            # Reload environment variables
+            load_dotenv(override=True)
         else:
             self.logger.error("Failed to refresh access token")
         return success
 
+    def update_token_file(self):
+        token_data = {
+            "access_token": self.token,
+            "refresh_token": self.refresh_token_string,
+            "expiry": self.twitch_api.token_expiry.isoformat() if self.twitch_api.token_expiry else None,
+        }
+        with open(self.token_file, "w") as f:
+            json.dump(token_data, f)
+
+    def load_tokens_from_file(self):
+        if os.path.exists(self.token_file):
+            with open(self.token_file, "r") as f:
+                token_data = json.load(f)
+            self.token = token_data.get("access_token")
+            self.refresh_token_string = token_data.get("refresh_token")
+            expiry = token_data.get("expiry")
+            if expiry:
+                self.twitch_api.token_expiry = datetime.fromisoformat(expiry)
+
     async def event_ready(self):
         self.logger.info(f"Logged in as | {self.nick}")
+        self.load_tokens_from_file()
+        await self.ensure_valid_token()
         await self.fetch_user_id()
         await self.fetch_example_streams()
         self.load_modules()
@@ -138,23 +187,10 @@ class TwitchBot(commands.Bot):
             self.logger.error(error_msg)
             raise ValueError(error_msg)
 
-    async def setup_auth(self):
-        """Set up authentication if needed."""
-        if not self.twitch_api.oauth_token or not self.twitch_api.refresh_token:
-            flow_id, auth_url = await self.twitch_api.create_auth_flow(
-                "YourAppName", ["chat:read", "chat:edit", "channel:moderate", "whispers:read", "whispers:edit"]
-            )
-            if flow_id and auth_url:
-                print(f"Please visit this URL to authorize the application: {auth_url}")
-                print("Waiting for authorization...")
-
-                while True:
-                    if await self.twitch_api.check_auth_status(flow_id):
-                        print("Authorization successful!")
-                        break
-                    await asyncio.sleep(5)
-            else:
-                raise ValueError("Failed to create authorization flow.")
+    async def create_session(self):
+        if self.http_session is None or self.http_session.closed:
+            self.http_session = aiohttp.ClientSession()
+        self.twitch_api.session = self.http_session
 
     async def event_channel_joined(self, channel):
         self.logger.info(f"Joined channel: {channel.name}")
@@ -231,7 +267,14 @@ class TwitchBot(commands.Bot):
 async def main():
     loop = asyncio.get_event_loop()
     bot = TwitchBot(loop)
-    await bot.run()
+
+    try:
+        await bot.run()
+    except KeyboardInterrupt:
+        await bot.close()
+    finally:
+        if bot.http_session:
+            await bot.http_session.close()
 
 
 if __name__ == "__main__":
