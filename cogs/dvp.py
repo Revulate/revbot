@@ -33,6 +33,7 @@ class DVP(commands.Cog):
         if not self.creds_file:
             raise ValueError("GOOGLE_CREDENTIALS_FILE is not set in the environment variables")
 
+        # Predefined abbreviations and aliases
         self.abbreviation_mapping = {
             "ff7": "FINAL FANTASY VII REMAKE",
             "ff16": "FINAL FANTASY XVI",
@@ -43,28 +44,19 @@ class DVP(commands.Cog):
             "er": "ELDEN RING",
             "ds3": "DARK SOULS III",
             "gow": "God of War",
-            "gta": "Grand Theft Auto V",  # Added GTA abbreviation
+            "gta": "Grand Theft Auto V",
             "gta5": "Grand Theft Auto V",
-            "gtaiv": "Grand Theft Auto IV",
-            "gta4": "Grand Theft Auto IV",
-            "gta3": "Grand Theft Auto III",
-            "gta san andreas": "Grand Theft Auto: San Andreas",
-            "gta vice city": "Grand Theft Auto: Vice City",
             "botw": "The Legend of Zelda: Breath of the Wild",
             "totk": "The Legend of Zelda: Tears of the Kingdom",
             "ac": "Assassin's Creed",
-            "ac odyssey": "Assassin's Creed Odyssey",
-            "ac valhalla": "Assassin's Creed Valhalla",
             "ac origins": "Assassin's Creed Origins",
+            "ac odyssey": "Assassin's Creed Odyssey",
             "ffx": "FINAL FANTASY X",
-            "ffxii": "FINAL FANTASY XII",
-            "ffxiii": "FINAL FANTASY XIII",
-            "ffxv": "FINAL FANTASY XV",
             "bb": "Bloodborne",
             "tw3": "The Witcher 3: Wild Hunt",
             "witcher 3": "The Witcher 3: Wild Hunt",
-            "boneworks": "BONELAB",  # Added Boneworks mapping
-            "bonelab": "BONELAB",
+            "boneworks": "BONEWORKS",
+            # Add more as needed
         }
 
         self.sheet_url = os.getenv("GOOGLE_SHEET_URL")
@@ -245,17 +237,6 @@ class DVP(commands.Cog):
             elif unit == "s":
                 total_seconds += int(value)
         return total_seconds
-
-    async def update_initials_mapping(self):
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT name FROM games") as cursor:
-                games = await cursor.fetchall()
-        self.initials_mapping = {}
-        for game in games:
-            name = game[0]
-            initials = self.generate_initials(name)
-            self.initials_mapping[initials.lower()] = name
-            self.logger.debug(f"Updated initials mapping: '{initials.lower()}' for game '{name}'")
 
     def generate_initials(self, title):
         title_cleaned = re.sub(r"[^A-Za-z0-9 ]+", "", title)
@@ -675,6 +656,13 @@ class DVP(commands.Cog):
                 )
             await db.commit()
 
+    async def update_initials_mapping(self):
+        # Use only predefined abbreviations
+        self.initials_mapping = {}
+        for abbrev, game_name in self.abbreviation_mapping.items():
+            self.initials_mapping[abbrev.lower()] = game_name
+            self.logger.debug(f"Updated initials mapping: '{abbrev.lower()}' for game '{game_name}'")
+
     @commands.command(name="dvp")
     async def did_vulpes_play_it(self, ctx: commands.Context, *, game_name: str):
         self.logger.info(f"dvp command called with game: {game_name}")
@@ -682,8 +670,7 @@ class DVP(commands.Cog):
         try:
             # Normalize the input
             game_name_normalized = game_name.strip().lower()
-            input_initials = self.generate_initials(game_name_normalized)
-            self.logger.debug(f"Generated initials '{input_initials}' for input '{game_name_normalized}'")
+            self.logger.debug(f"Normalized game name: '{game_name_normalized}'")
 
             # Check if the input matches any known abbreviations
             if game_name_normalized in self.abbreviation_mapping:
@@ -691,9 +678,6 @@ class DVP(commands.Cog):
                 self.logger.debug(
                     f"Input '{game_name_normalized}' matched to abbreviation mapping '{game_name_to_search}'"
                 )
-            elif input_initials in self.initials_mapping:
-                game_name_to_search = self.initials_mapping[input_initials]
-                self.logger.debug(f"Initials '{input_initials}' matched to '{game_name_to_search}'")
             else:
                 # Fetch game names from the database
                 async with aiosqlite.connect(self.db_path) as db:
@@ -704,26 +688,34 @@ class DVP(commands.Cog):
                 # Convert all game names to lowercase for matching
                 game_names_lower = [name.lower() for name in game_names]
 
-                # Check for exact substring matches
-                matches = [
-                    original_name
-                    for original_name, lower_name in zip(game_names, game_names_lower)
-                    if game_name_normalized in lower_name
-                ]
-                if matches:
-                    game_name_to_search = matches[0]  # Choose the first match
-                    self.logger.debug(f"Substring matched '{game_name_normalized}' to '{game_name_to_search}'")
+                # Check for exact matches
+                if game_name_normalized in game_names_lower:
+                    index = game_names_lower.index(game_name_normalized)
+                    game_name_to_search = game_names[index]
+                    self.logger.debug(f"Exact match found: '{game_name_to_search}'")
                 else:
-                    # Proceed with enhanced fuzzy matching
-                    matches = process.extract(game_name_normalized, game_names, scorer=fuzz.token_set_ratio, limit=3)
-                    self.logger.debug(f"Fuzzy matches: {matches}")
-                    if matches and matches[0][1] >= 70:
-                        game_name_to_search = matches[0][0]
-                        self.logger.debug(f"Fuzzy matched '{game_name_normalized}' to '{game_name_to_search}'")
+                    # Check for substring matches
+                    matches = [
+                        original_name
+                        for original_name, lower_name in zip(game_names, game_names_lower)
+                        if game_name_normalized in lower_name
+                    ]
+                    if matches:
+                        game_name_to_search = matches[0]  # Choose the first match
+                        self.logger.debug(f"Substring matched '{game_name_normalized}' to '{game_name_to_search}'")
                     else:
-                        self.logger.warning(f"No matches found for '{game_name}' using fuzzy matching.")
-                        await ctx.send(f"@{ctx.author.name}, no games found matching '{game_name}'.")
-                        return
+                        # Proceed with enhanced fuzzy matching
+                        matches = process.extract(
+                            game_name_normalized, game_names, scorer=fuzz.token_set_ratio, limit=3
+                        )
+                        self.logger.debug(f"Fuzzy matches: {matches}")
+                        if matches and matches[0][1] >= 70:
+                            game_name_to_search = matches[0][0]
+                            self.logger.debug(f"Fuzzy matched '{game_name_normalized}' to '{game_name_to_search}'")
+                        else:
+                            self.logger.warning(f"No matches found for '{game_name}' using fuzzy matching.")
+                            await ctx.send(f"@{ctx.author.name}, no games found matching '{game_name}'.")
+                            return
 
             # Fetch game data and send response
             async with aiosqlite.connect(self.db_path) as db:
