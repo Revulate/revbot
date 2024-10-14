@@ -5,7 +5,7 @@ import os
 import aiohttp
 from datetime import datetime, timezone
 import logging
-from fuzzywuzzy import process
+from fuzzywuzzy import process, fuzz
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -43,6 +43,28 @@ class DVP(commands.Cog):
             "er": "ELDEN RING",
             "ds3": "DARK SOULS III",
             "gow": "God of War",
+            "gta": "Grand Theft Auto V",  # Added GTA abbreviation
+            "gta5": "Grand Theft Auto V",
+            "gtaiv": "Grand Theft Auto IV",
+            "gta4": "Grand Theft Auto IV",
+            "gta3": "Grand Theft Auto III",
+            "gta san andreas": "Grand Theft Auto: San Andreas",
+            "gta vice city": "Grand Theft Auto: Vice City",
+            "botw": "The Legend of Zelda: Breath of the Wild",
+            "totk": "The Legend of Zelda: Tears of the Kingdom",
+            "ac": "Assassin's Creed",
+            "ac odyssey": "Assassin's Creed Odyssey",
+            "ac valhalla": "Assassin's Creed Valhalla",
+            "ac origins": "Assassin's Creed Origins",
+            "ffx": "FINAL FANTASY X",
+            "ffxii": "FINAL FANTASY XII",
+            "ffxiii": "FINAL FANTASY XIII",
+            "ffxv": "FINAL FANTASY XV",
+            "bb": "Bloodborne",
+            "tw3": "The Witcher 3: Wild Hunt",
+            "witcher 3": "The Witcher 3: Wild Hunt",
+            "boneworks": "BONELAB",  # Added Boneworks mapping
+            "bonelab": "BONELAB",
         }
 
         self.sheet_url = os.getenv("GOOGLE_SHEET_URL")
@@ -673,19 +695,35 @@ class DVP(commands.Cog):
                 game_name_to_search = self.initials_mapping[input_initials]
                 self.logger.debug(f"Initials '{input_initials}' matched to '{game_name_to_search}'")
             else:
-                # Proceed with fuzzy matching
+                # Fetch game names from the database
                 async with aiosqlite.connect(self.db_path) as db:
                     async with db.execute("SELECT name FROM games") as cursor:
                         games = await cursor.fetchall()
                 game_names = [game[0] for game in games]
-                match = process.extractOne(game_name_normalized, game_names)
-                if match and match[1] >= 80:
-                    game_name_to_search = match[0]
-                    self.logger.debug(f"Fuzzy matched '{game_name_normalized}' to '{game_name_to_search}'")
+
+                # Convert all game names to lowercase for matching
+                game_names_lower = [name.lower() for name in game_names]
+
+                # Check for exact substring matches
+                matches = [
+                    original_name
+                    for original_name, lower_name in zip(game_names, game_names_lower)
+                    if game_name_normalized in lower_name
+                ]
+                if matches:
+                    game_name_to_search = matches[0]  # Choose the first match
+                    self.logger.debug(f"Substring matched '{game_name_normalized}' to '{game_name_to_search}'")
                 else:
-                    self.logger.warning(f"No matches found for '{game_name}' using fuzzy matching.")
-                    await ctx.send(f"@{ctx.author.name}, no games found matching '{game_name}'.")
-                    return
+                    # Proceed with enhanced fuzzy matching
+                    matches = process.extract(game_name_normalized, game_names, scorer=fuzz.token_set_ratio, limit=3)
+                    self.logger.debug(f"Fuzzy matches: {matches}")
+                    if matches and matches[0][1] >= 70:
+                        game_name_to_search = matches[0][0]
+                        self.logger.debug(f"Fuzzy matched '{game_name_normalized}' to '{game_name_to_search}'")
+                    else:
+                        self.logger.warning(f"No matches found for '{game_name}' using fuzzy matching.")
+                        await ctx.send(f"@{ctx.author.name}, no games found matching '{game_name}'.")
+                        return
 
             # Fetch game data and send response
             async with aiosqlite.connect(self.db_path) as db:
