@@ -79,12 +79,11 @@ class Stats(commands.Cog):
         stats = []
         stats.append(f"Stats for {user.display_name} (ID: {user.id}):")
         stats.append(f"Account created: {self.format_time_ago(user.created_at)}")
-        stats.append(f"Account type: {self.get_account_type(channel_info)}")
 
         if channel_info and channel_info.game_name:
             stats.append(f"Current game: {channel_info.game_name}")
 
-        if channel_info:
+        if channel_info and hasattr(channel_info, "language"):
             stats.append(f"Language: {channel_info.language}")
 
         if db_stats:
@@ -129,16 +128,6 @@ class Stats(commands.Cog):
             return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
         else:
             return f"{delta.seconds} second{'s' if delta.seconds != 1 else ''} ago"
-
-    def get_account_type(self, channel_info):
-        if not channel_info:
-            return "Regular User"
-        if channel_info.broadcaster_type == "partner":
-            return "Partner"
-        elif channel_info.broadcaster_type == "affiliate":
-            return "Affiliate"
-        else:
-            return "Regular User"
 
 
 def prepare(bot):

@@ -1,134 +1,114 @@
-import time
+from dotenv import load_dotenv
 from twitchio.ext import commands
 from datetime import datetime, timezone
-import aiosqlite
+
+load_dotenv()
 
 
-class Stats(commands.Cog):
+class User(commands.Cog):
+    """Cog for displaying Twitch user information."""
+
     def __init__(self, bot):
         self.bot = bot
-        self.db_path = "user_stats.db"
-        self.bot.loop.create_task(self.setup_database())
 
-    async def setup_database(self):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS user_stats (
-                    user_id TEXT PRIMARY KEY,
-                    username TEXT,
-                    message_count INTEGER DEFAULT 0,
-                    first_seen TIMESTAMP,
-                    last_seen TIMESTAMP
-                )
-            """
-            )
-            await db.commit()
+    def format_enum(self, enum_value):
+        """Format enum value to a readable string."""
+        if enum_value is None:
+            return "None"
+        return str(enum_value).split(".")[-1].capitalize()
 
-    @commands.Cog.event()
-    async def event_message(self, message):
-        if message.echo:
-            return
+    def format_account_age(self, created_at):
+        """Format account age to include years, months, and the exact creation date."""
+        now = datetime.now(timezone.utc)
+        age = now - created_at
+        years, remainder = divmod(age.days, 365)
+        months, days = divmod(remainder, 30)
 
-        user_id = message.author.id
-        username = message.author.name
-        current_time = datetime.now(timezone.utc)
+        age_parts = []
+        if years > 0:
+            age_parts.append(f"{years} year{'s' if years != 1 else ''}")
+        if months > 0:
+            age_parts.append(f"{months} month{'s' if months != 1 else ''}")
+        if days > 0:
+            age_parts.append(f"{days} day{'s' if days != 1 else ''}")
 
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                INSERT INTO user_stats (user_id, username, message_count, first_seen, last_seen)
-                VALUES (?, ?, 1, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    message_count = message_count + 1,
-                    last_seen = ?
-            """,
-                (user_id, username, current_time, current_time, current_time),
-            )
-            await db.commit()
+        age_str = ", ".join(age_parts)
+        return f"{age_str} ago (Created on {created_at.strftime('%Y-%m-%d')})"
 
-    @commands.command(name="stats")
-    async def stats_command(self, ctx: commands.Context, username: str = None):
-        if username is None:
+    async def get_ban_info(self, broadcaster_id, user_id):
+        """Fetch ban information for a user in a specific broadcaster's channel."""
+        try:
+            if hasattr(self.bot, "fetch_channel_bans"):
+                bans = await self.bot.fetch_channel_bans(broadcaster_id, user_ids=[user_id])
+                return bans[0] if bans else None
+            else:
+                self.bot.logger.warning("fetch_channel_bans method not available. Unable to fetch ban info.")
+                return None
+        except Exception as e:
+            self.bot.logger.error(f"Error fetching ban info: {e}")
+            return None
+
+    @commands.command(name="user")
+    async def user_command(self, ctx: commands.Context, username: str = None):
+        """
+        Fetches and displays information about a Twitch user.
+        Usage: #user <username>
+        If no username is provided, it shows information about the command user.
+        """
+        if not username:
             username = ctx.author.name
 
-        user = await self.bot.fetch_users([username])
-        if not user:
-            await ctx.send(f"@{ctx.author.name}, user '{username}' not found.")
-            return
-
-        user = user[0]
-        user_id = str(user.id)
-
-        # Fetch user stats from Twitch API
         try:
-            channel_info = await self.bot.fetch_channels([user_id])
-            channel_info = channel_info[0] if channel_info else None
+            # Fetch the target user's information
+            users = await self.bot.fetch_users(names=[username])
+            if not users:
+                await ctx.send(f"@{ctx.author.name}, no user found with the name '{username}'.")
+                return
+
+            user = users[0]
+            account_age = self.format_account_age(user.created_at)
+
+            # Fetch the broadcaster's user ID
+            broadcaster_name = ctx.channel.name
+            broadcasters = await self.bot.fetch_users(names=[broadcaster_name])
+            if not broadcasters:
+                await ctx.send(f"@{ctx.author.name}, could not fetch broadcaster information.")
+                return
+
+            broadcaster = broadcasters[0]
+            broadcaster_id = broadcaster.id
+
+            # Fetch ban information
+            ban_info = await self.get_ban_info(broadcaster_id, user.id)
+
+            response = (
+                f"@{ctx.author.name}, User info for {user.display_name} (twitch.tv/{user.name}): "
+                f"ID: {user.id} | "
+                f"Created: {account_age} | "
+                f"Bio: {user.description[:100]}{'...' if len(user.description) > 100 else ''} | "
+                f"Profile Picture: {user.profile_image}"
+            )
+
+            if ban_info:
+                ban_type = "Banned" if ban_info.expires_at is None else "Timed out"
+                expiry = (
+                    f" until {ban_info.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}" if ban_info.expires_at else ""
+                )
+                banned_by = ban_info.moderator.name if ban_info.moderator else "Unknown"
+
+                response += (
+                    f" | {ban_type} in this channel{expiry} | "
+                    f"Reason: {ban_info.reason or 'No reason provided'} | "
+                    f"Banned by: {banned_by}"
+                )
+
+            await ctx.send(response)
         except Exception as e:
-            self.bot.logger.error(f"Error fetching channel info: {e}")
-            channel_info = None
-
-        # Fetch user stats from our database
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT message_count, first_seen, last_seen FROM user_stats WHERE user_id = ?", (user_id,)
-            ) as cursor:
-                db_stats = await cursor.fetchone()
-
-        # Prepare stats message
-        stats = []
-        stats.append(f"Stats for {user.display_name} (ID: {user.id}):")
-        stats.append(f"Account created: {self.format_time_ago(user.created_at)}")
-
-        if channel_info and channel_info.game_name:
-            stats.append(f"Current game: {channel_info.game_name}")
-
-        if channel_info and hasattr(channel_info, "language"):
-            stats.append(f"Language: {channel_info.language}")
-
-        if db_stats:
-            message_count, first_seen, last_seen = db_stats
-            stats.append(f"Messages sent in this channel: {message_count}")
-            stats.append(f"First seen in this channel: {self.format_time_ago(first_seen)}")
-            stats.append(f"Last seen in this channel: {self.format_time_ago(last_seen)}")
-        else:
-            stats.append("No message history found in this channel.")
-
-        # Fetch follow information
-        try:
-            follows = await self.bot.fetch_followers(user_id, first=1)
-            if follows:
-                stats.append(f"Followers: {follows.total}")
-        except Exception as e:
-            self.bot.logger.error(f"Error fetching follower count: {e}")
-
-        # Send stats
-        await ctx.send(" | ".join(stats))
-
-    def format_time_ago(self, timestamp):
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp.rstrip("Z")).replace(tzinfo=timezone.utc)
-
-        now = datetime.now(timezone.utc)
-        delta = now - timestamp
-
-        if delta.days > 365:
-            years = delta.days // 365
-            return f"{years} year{'s' if years != 1 else ''} ago"
-        elif delta.days > 30:
-            months = delta.days // 30
-            return f"{months} month{'s' if months != 1 else ''} ago"
-        elif delta.days > 0:
-            return f"{delta.days} day{'s' if delta.days != 1 else ''} ago"
-        elif delta.seconds > 3600:
-            hours = delta.seconds // 3600
-            return f"{hours} hour{'s' if hours != 1 else ''} ago"
-        elif delta.seconds > 60:
-            minutes = delta.seconds // 60
-            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-        else:
-            return f"{delta.seconds} second{'s' if delta.seconds != 1 else ''} ago"
+            self.bot.logger.error(f"Error fetching user info: {e}")
+            await ctx.send(
+                f"@{ctx.author.name}, an error occurred while fetching user information. Please try again later."
+            )
 
 
 def prepare(bot):
-    bot.add_cog(Stats(bot))
+    bot.add_cog(User(bot))
