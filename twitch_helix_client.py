@@ -114,12 +114,13 @@ class TwitchAPI:
 
     async def ensure_token_valid(self):
         if not self.oauth_token or (self.token_expiry and datetime.datetime.now() >= self.token_expiry):
-            return await self.refresh_oauth_token()
+            success = await self.refresh_oauth_token()
+            if not success:
+                raise Exception("Failed to refresh OAuth token")
         return True
 
     async def api_request(self, endpoint, params=None, method="GET", data=None):
-        if not await self.ensure_token_valid():
-            raise Exception("Failed to obtain a valid token")
+        await self.ensure_token_valid()
 
         url = f"{self.BASE_URL}/{endpoint}"
         headers = {
@@ -127,41 +128,28 @@ class TwitchAPI:
             "Client-ID": self.client_id,
         }
 
-        session = self.session or aiohttp.ClientSession()
-        should_close_session = self.session is None
+        async def perform_request(session):
+            try:
+                if method == "GET":
+                    async with session.get(url, params=params, headers=headers) as response:
+                        response.raise_for_status()
+                        return await response.json()
+                elif method == "POST":
+                    async with session.post(url, params=params, headers=headers, json=data) as response:
+                        response.raise_for_status()
+                        return await response.json()
+            except aiohttp.ClientResponseError as e:
+                if e.status == 401:
+                    if await self.refresh_oauth_token():
+                        headers["Authorization"] = f"Bearer {self.oauth_token}"
+                        return await perform_request(session)
+                raise
 
-        try:
-            for _ in range(2):  # Try twice: once with current token, once after refreshing
-                try:
-                    if method == "GET":
-                        async with session.get(url, params=params, headers=headers) as response:
-                            if response.status == 401:
-                                if await self.refresh_oauth_token():
-                                    headers["Authorization"] = f"Bearer {self.oauth_token}"
-                                    continue
-                                else:
-                                    raise Exception("Failed to refresh token")
-                            response.raise_for_status()
-                            return await response.json()
-                    elif method == "POST":
-                        async with session.post(url, params=params, headers=headers, json=data) as response:
-                            if response.status == 401:
-                                if await self.refresh_oauth_token():
-                                    headers["Authorization"] = f"Bearer {self.oauth_token}"
-                                    continue
-                                else:
-                                    raise Exception("Failed to refresh token")
-                            response.raise_for_status()
-                            return await response.json()
-                except aiohttp.ClientResponseError as e:
-                    logger.error(f"API request error: {e}", exc_info=True)
-                    if e.status != 401:
-                        raise
-                break  # If we get here, we've either succeeded or failed after a refresh
-            raise Exception("Failed to complete API request")
-        finally:
-            if should_close_session:
-                await session.close()
+        if self.session:
+            return await perform_request(self.session)
+        else:
+            async with aiohttp.ClientSession() as session:
+                return await perform_request(session)
 
     async def get_streams(self, user_logins):
         params = {"user_login": user_logins}

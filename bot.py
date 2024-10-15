@@ -12,6 +12,7 @@ from twitch_helix_client import TwitchAPI
 import aiohttp
 import sys
 import codecs
+import traceback
 
 sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
 sys.stderr = codecs.getwriter("utf-8")(sys.stderr.buffer, "strict")
@@ -223,10 +224,6 @@ async def main():
     while True:
         try:
             await bot.start()
-        except AuthenticationError:
-            logger.error("Authentication failed. Refreshing token and retrying...")
-            await bot.twitch_api.refresh_oauth_token()
-            continue
         except Exception as e:
             logger.error(f"An unexpected error occurred: {e}")
             logger.error(f"Error traceback: {traceback.format_exc()}")
