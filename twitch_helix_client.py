@@ -236,14 +236,20 @@ class TwitchAPI:
 
     async def get_game_image_url(self, game_name):
         try:
+            url = "https://api.twitch.tv/helix/games"
+            headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.bot.twitch_api.oauth_token}"}
             params = {"name": game_name}
-            data = await self.api_request("games", params=params)
-            if data["data"]:
-                box_art_url = data["data"][0]["box_art_url"]
-                return box_art_url.replace("{width}", "285").replace("{height}", "380")
-            logger.warning(f"No image found for game: {game_name}")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data["data"]:
+                            box_art_url = data["data"][0]["box_art_url"]
+                            # Replace placeholder dimensions with actual values
+                            return box_art_url.replace("{width}", "285").replace("{height}", "380")
+            self.logger.warning(f"No image found for game: {game_name}")
         except Exception as e:
-            logger.error(f"Error fetching image URL for {game_name}: {e}")
+            self.logger.error(f"Error fetching image URL for {game_name}: {e}", exc_info=True)
         return ""
 
     async def close(self):

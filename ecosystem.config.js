@@ -1,3 +1,5 @@
+// ecosystem.config.js
+
 module.exports = {
     apps: [{
       name: "twitch-bot",
@@ -13,6 +15,9 @@ module.exports = {
       env_production: {
         NODE_ENV: "production",
         PYTHONUNBUFFERED: "1"
-      }
+      },
+      // Add the following line
+      env_file: "/home/actionsrunner/revbot/.env"
     }]
   }
+  
