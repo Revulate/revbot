@@ -350,6 +350,7 @@ class DVP(commands.Cog):
             )
             await db.commit()
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def update_google_sheet(self):
         creds = Credentials.from_service_account_file(
             self.creds_file, scopes=["https://www.googleapis.com/auth/spreadsheets"]
@@ -403,6 +404,7 @@ class DVP(commands.Cog):
             self.logger.info("Google Sheet updated successfully.")
         except HttpError as error:
             self.logger.error(f"An error occurred while updating the Google Sheet: {error}")
+            raise
 
     async def apply_sheet_formatting(self, service, data_row_count):
         try:
