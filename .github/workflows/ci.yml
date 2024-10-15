@@ -14,49 +14,59 @@ jobs:
     runs-on: self-hosted  # Runs directly on your Raspberry Pi
 
     steps:
-      # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # 2. Create and Activate Virtual Environment, then Install Dependencies
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Set up Python Virtual Environment and Install Dependencies
         run: |
-          # Create a virtual environment if it doesn't exist
           if [ ! -d "venv" ] && [ ! -d "env" ]; then
-            python3.11 -m venv venv  # Adjust to python3.10 if necessary
+            python3.11 -m venv venv
           fi
-          
-          # Activate the virtual environment
           if [ -d "venv" ]; then
             source venv/bin/activate
           elif [ -d "env" ]; then
             source env/bin/activate
           fi
-          
-          # Upgrade pip inside the virtual environment
           python -m pip install --upgrade pip
-
-          # Install the required dependencies inside the virtual environment
           pip install -r requirements.txt
 
+      - name: Run linter and tests
+        run: |
+          pip install flake8 pytest
+          flake8 .
+          pytest
+
   deploy:
-    runs-on: self-hosted  # Use the self-hosted runner for deployment too
+    runs-on: self-hosted
     needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
       - name: Deploy to Raspberry Pi
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
-          set -e  # Exit immediately if a command exits with a non-zero status
+          set -e
           REVUBOT_DIR=~/revbot
           REPO_URL=https://github.com/Revulate/revbot.git
+          BACKUP_DIR=~/revbot_backup_$(date +%Y%m%d_%H%M%S)
 
-          # Create revbot directory if it doesn't exist
+          # Backup current version
+          if [ -d "$REVUBOT_DIR" ]; then
+            cp -r $REVUBOT_DIR $BACKUP_DIR
+          fi
+
           mkdir -p $REVUBOT_DIR
           cd $REVUBOT_DIR
 
-          # If .git exists, pull; else, clone the repository
           if [ -d ".git" ]; then
             git fetch origin
             git checkout main
@@ -65,22 +75,18 @@ jobs:
             git clone --branch main $REPO_URL .
           fi
 
-          # Use the existing virtual environment or create one if necessary
           if [ ! -d "venv" ] && [ ! -d "env" ]; then
-            python3.11 -m venv venv  # Adjust to python3.10 if necessary
+            python3.11 -m venv venv
           fi
-
-          # Activate the virtual environment
           if [ -d "venv" ]; then
             source venv/bin/activate
           elif [ -d "env" ]; then
             source env/bin/activate
           fi
 
-          # Install dependencies within the virtual environment
           pip install -r requirements.txt
 
-          # Create or update the .env file
+          # Create .env file (using existing secrets)
           cat <<EOF > .env
           TWITCH_CLIENT_ID=${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET=${{ secrets.TWITCH_CLIENT_SECRET }}
@@ -105,24 +111,18 @@ jobs:
           GOOGLE_CREDENTIALS_FILE=credentials.json
           EOF
 
-          # Create the credentials.json file from the secret
           echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
-
-          # Set appropriate permissions for credentials.json
           chmod 600 credentials.json
 
-          # Install Node.js and npm if not already installed
           if ! command -v node &> /dev/null; then
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
             sudo apt-get install -y nodejs
           fi
 
-          # Install PM2 globally if not already installed
           if ! command -v pm2 &> /dev/null; then
             sudo npm install -g pm2
           fi
 
-          # Create ecosystem.config.js file
           cat <<EOF > ecosystem.config.js
           module.exports = {
             apps: [{
@@ -144,20 +144,38 @@ jobs:
           }
           EOF
 
-          # Start or restart the bot using PM2
+          # Run database migrations if any
+          if [ -f "migrate.py" ]; then
+            python migrate.py
+          fi
+
           pm2 start ecosystem.config.js --update-env
-
-          # Save PM2 process list and environment
           pm2 save
-
-          # Ensure PM2 starts on system boot
           sudo pm2 startup systemd -u $USER --hp $HOME
 
-          # Add a simple health check
-          sleep 10  # Give the bot some time to start up
+          # Health check
+          sleep 10
           if ! pm2 list | grep -q "online"; then
             echo "Error: twitch-bot is not running after restart"
+            # Rollback
+            echo "Rolling back to previous version..."
+            rm -rf $REVUBOT_DIR
+            mv $BACKUP_DIR $REVUBOT_DIR
+            cd $REVUBOT_DIR
+            pm2 start ecosystem.config.js --update-env
             exit 1
           fi
 
           echo "Deployment completed successfully"
+
+      - name: Cleanup old backups
+        run: |
+          find ~/revbot_backup_* -maxdepth 0 -type d -mtime +7 -exec rm -rf {} +
+
+      - name: Notify on success
+        if: success()
+        run: echo "Deployment successful" # Replace with your notification method
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "Deployment failed" # Replace with your notification method

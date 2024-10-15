@@ -1,55 +1,42 @@
-# cogs/dvp.py
-
 import asyncio
 import aiosqlite
 from twitchio.ext import commands
 import os
 from datetime import datetime, timezone, timedelta
-import logging
 from fuzzywuzzy import process, fuzz
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from playwright.async_api import async_playwright
 from tenacity import retry, stop_after_attempt, wait_exponential
-import re  # Added for regex operations
-import validators  # Added for URL validation
-from dotenv import load_dotenv  # Added to load environment variables
+import re
+from dotenv import load_dotenv
 
-from twitch_helix_client import TwitchAPI  # Adjust the import path as necessary
+from twitch_helix_client import TwitchAPI
+from logger import log_error, log_info, log_warning
+from utils import is_valid_url
 
 
 class DVP(commands.Cog):
     def __init__(self, bot):
-        load_dotenv()  # Load environment variables from .env file
+        load_dotenv()
         self.bot = bot
         self.db_path = "vulpes_games.db"
         self.channel_name = "vulpeshd"
-        self.logger = logging.getLogger("twitch_bot.cogs.dvp")  # Use child logger
-        self.logger.setLevel(logging.DEBUG)
         self.update_scrape_task = None
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE")
         self.db_initialized = asyncio.Event()
         self.last_scrape_time = None
+        self.browser = None
 
-        if not self.sheet_id:
-            self.logger.error("GOOGLE_SHEET_ID is not set in the environment variables")
-            raise ValueError("GOOGLE_SHEET_ID is not set in the environment variables")
-        if not self.creds_file:
-            self.logger.error("GOOGLE_CREDENTIALS_FILE is not set in the environment variables")
-            raise ValueError("GOOGLE_CREDENTIALS_FILE is not set in the environment variables")
+        if not self.sheet_id or not self.creds_file:
+            raise ValueError("GOOGLE_SHEET_ID and GOOGLE_CREDENTIALS_FILE must be set in environment variables")
 
         # Initialize TwitchAPI
         client_id = os.getenv("TWITCH_CLIENT_ID")
         client_secret = os.getenv("TWITCH_CLIENT_SECRET")
         redirect_uri = os.getenv("TWITCH_REDIRECT_URI")
-        if not client_id:
-            self.logger.error("TWITCH_CLIENT_ID is not set in the environment variables")
-        if not client_secret:
-            self.logger.error("TWITCH_CLIENT_SECRET is not set in the environment variables")
-        if not redirect_uri:
-            self.logger.error("TWITCH_REDIRECT_URI is not set in the environment variables")
         if not client_id or not client_secret or not redirect_uri:
             raise ValueError(
                 "TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, and TWITCH_REDIRECT_URI must be set in environment variables"
@@ -88,15 +75,21 @@ class DVP(commands.Cog):
         self.bot.loop.create_task(self.initialize_cog())
 
     async def initialize_cog(self):
-        self.logger.info("DVP cog is initializing")
+        log_info("DVP cog is initializing")
         await self.setup_database()
         await self.load_last_scrape_time()
         await self.initialize_data()
-        self.update_scrape_task = self.bot.loop.create_task(self.periodic_scrape_update())
-        self.logger.info("DVP cog initialized successfully")
+        self.update_scrape_task = asyncio.create_task(self.periodic_scrape_update())
+        log_info("DVP cog initialized successfully")
+
+    async def cog_unload(self):
+        if self.update_scrape_task:
+            self.update_scrape_task.cancel()
+        if self.browser:
+            await self.browser.close()
 
     async def setup_database(self):
-        self.logger.info(f"Setting up database at {self.db_path}")
+        log_info(f"Setting up database at {self.db_path}")
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute(
@@ -107,7 +100,7 @@ class DVP(commands.Cog):
                         time_played INTEGER NOT NULL,
                         last_played DATE NOT NULL
                     )
-                    """
+                """
                 )
                 await db.execute(
                     """
@@ -115,12 +108,12 @@ class DVP(commands.Cog):
                         key TEXT PRIMARY KEY,
                         value TEXT
                     )
-                    """
+                """
                 )
                 await db.commit()
-            self.logger.info("Database setup complete")
+            log_info("Database setup complete")
         except Exception as e:
-            self.logger.error(f"Error setting up database: {e}", exc_info=True)
+            log_error(f"Error setting up database: {e}", exc_info=True)
             raise
 
     async def load_last_scrape_time(self):
@@ -130,9 +123,9 @@ class DVP(commands.Cog):
                 if result:
                     try:
                         self.last_scrape_time = datetime.fromisoformat(result[0])
-                        self.logger.info(f"Last scrape time loaded: {self.last_scrape_time}")
+                        log_info(f"Last scrape time loaded: {self.last_scrape_time}")
                     except ValueError as ve:
-                        self.logger.error(f"Invalid datetime format in metadata: {result[0]}", exc_info=True)
+                        log_error(f"Invalid datetime format in metadata: {result[0]}. Error: {ve}", exc_info=True)
                         self.last_scrape_time = None
 
     async def save_last_scrape_time(self):
@@ -144,30 +137,30 @@ class DVP(commands.Cog):
             )
             await db.commit()
         self.last_scrape_time = current_time
-        self.logger.info(f"Last scrape time saved: {self.last_scrape_time}")
+        log_info(f"Last scrape time saved: {self.last_scrape_time}")
 
     async def initialize_data(self):
         try:
-            self.logger.info("Initializing data")
+            log_info("Initializing data")
             if not self.last_scrape_time or (datetime.now(timezone.utc) - self.last_scrape_time) > timedelta(days=7):
-                self.logger.info("Performing initial web scraping")
+                log_info("Performing initial web scraping")
                 await self.scrape_initial_data()
                 await self.save_last_scrape_time()
             else:
-                self.logger.info("Skipping web scraping, using existing data")
+                log_info("Skipping web scraping, using existing data")
             await self.update_initials_mapping()
             self.db_initialized.set()
-            self.logger.info("Data initialization completed successfully.")
+            log_info("Data initialization completed successfully.")
         except Exception as e:
-            self.logger.error(f"Error initializing data: {e}", exc_info=True)
+            log_error(f"Error initializing data: {e}", exc_info=True)
             self.db_initialized.set()
 
     async def scrape_initial_data(self):
-        self.logger.info("Initializing data from web scraping using Playwright...")
+        log_info("Initializing data from web scraping using Playwright...")
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context()
+                self.browser = await p.chromium.launch(headless=True)
+                context = await self.browser.new_context()
                 page = await context.new_page()
 
                 await page.goto(f"https://twitchtracker.com/{self.channel_name}/games")
@@ -177,7 +170,7 @@ class DVP(commands.Cog):
                 await asyncio.sleep(5)
 
                 rows = await page.query_selector_all("#games tbody tr")
-                self.logger.info(f"Found {len(rows)} rows in the games table.")
+                log_info(f"Found {len(rows)} rows in the games table.")
 
                 async with aiosqlite.connect(self.db_path) as db:
                     for row in rows:
@@ -190,7 +183,7 @@ class DVP(commands.Cog):
                             try:
                                 last_played = datetime.strptime(last_played_str, "%d/%b/%Y").date()
                             except ValueError as ve:
-                                self.logger.error(f"Error parsing date '{last_played_str}': {ve}", exc_info=True)
+                                log_error(f"Error parsing date '{last_played_str}': {ve}", exc_info=True)
                                 last_played = datetime.now(timezone.utc).date()
                             await db.execute(
                                 """
@@ -204,37 +197,28 @@ class DVP(commands.Cog):
                             )
                     await db.commit()
 
-                await browser.close()
-                self.logger.info("Initial data scraping completed and data inserted into the database.")
+                log_info("Initial data scraping completed and data inserted into the database.")
         except Exception as e:
-            self.logger.error(f"Error during data scraping: {e}", exc_info=True)
+            log_error(f"Error during data scraping: {e}", exc_info=True)
+        finally:
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
 
     def parse_time(self, time_str):
-        """
-        Parses the time played string and converts it to total minutes.
-        Expected formats:
-        - "596\n20.5%" -> 596 minutes
-        - "0.5\n0%" -> 0.5 hours (30 minutes)
-        - "1 day 2 hours" -> 1560 minutes
-        """
         total_minutes = 0
-        # Remove commas, strip spaces, and split by newline to remove percentage
-        time_str = time_str.replace(",", "").strip().split("\n")[0]
-        # Remove any '%' symbols
-        time_str = time_str.replace("%", "")
+        time_str = time_str.replace(",", "").strip().split("\n")[0].replace("%", "")
         try:
             if "." in time_str:
-                # Assume the value before the newline is in hours
                 hours = float(time_str)
                 total_minutes = int(hours * 60)
             else:
                 parts = time_str.split()
                 i = 0
                 while i < len(parts):
-                    # Use regex to extract numeric value
                     value_match = re.match(r"(\d+(\.\d+)?)", parts[i])
                     if not value_match:
-                        self.logger.error(f"Invalid numeric value in time string '{time_str}'")
+                        log_error(f"Invalid numeric value in time string '{time_str}'")
                         break
                     value = float(value_match.group(1))
                     if i + 1 < len(parts):
@@ -250,9 +234,9 @@ class DVP(commands.Cog):
                     elif unit == "minute":
                         total_minutes += value
                     else:
-                        self.logger.error(f"Unknown time unit '{unit}' in time string '{time_str}'")
+                        log_error(f"Unknown time unit '{unit}' in time string '{time_str}'")
         except Exception as e:
-            self.logger.error(f"Error parsing time string '{time_str}': {e}", exc_info=True)
+            log_error(f"Error parsing time string '{time_str}': {e}", exc_info=True)
 
         return time_str, total_minutes
 
@@ -282,80 +266,66 @@ class DVP(commands.Cog):
             ) as cursor:
                 rows = await cursor.fetchall()
 
-        # Prepare data for the sheet
         headers = ["Game Image", "Game Name", "Time Played", "Last Played"]
         data = [headers]
 
         for row in rows:
             name, minutes, last_played = row
-            # Correct method call
             game_image_url = await self.twitch_api.get_game_image_url(name)
 
-            # Validate URL
-            if game_image_url and not self.is_valid_url(game_image_url):
-                self.logger.warning(f"Invalid image URL for game '{name}': {game_image_url}")
+            if game_image_url and not is_valid_url(game_image_url):
+                log_warning(f"Invalid image URL for game '{name}': {game_image_url}")
                 img_formula = ""
             else:
                 img_formula = f'=IMAGE("{game_image_url}")' if game_image_url else ""
 
-            # Format the time played into days, hours, minutes
             time_played = self.format_playtime(minutes)
 
-            # Format the last played date
             try:
                 last_played_date = datetime.strptime(str(last_played), "%Y-%m-%d")
                 last_played_formatted = last_played_date.strftime("%B %d, %Y")
             except ValueError as ve:
-                self.logger.error(f"Error formatting last played date '{last_played}': {ve}", exc_info=True)
+                log_error(f"Error formatting last played date '{last_played}': {ve}", exc_info=True)
                 last_played_formatted = str(last_played)
 
             data.append([img_formula, name, time_played, last_played_formatted])
 
-        # Update the data starting from cell A3
         body = {"values": data}
 
         try:
-            # Clear existing data from A3 onwards
             service.spreadsheets().values().clear(
                 spreadsheetId=self.sheet_id,
-                range="A3:D1000",  # Ensure this matches the number of columns
+                range="A3:D1000",
             ).execute()
 
-            # Write the data
             service.spreadsheets().values().update(
                 spreadsheetId=self.sheet_id, range="A3", valueInputOption="USER_ENTERED", body=body
             ).execute()
 
-            # Apply the header and formatting
             await self.apply_sheet_formatting(service, len(data))
 
-            self.logger.info("Google Sheet updated successfully.")
+            log_info("Google Sheet updated successfully.")
         except HttpError as error:
-            self.logger.error(f"An error occurred while updating the Google Sheet: {error}")
+            log_error(f"An error occurred while updating the Google Sheet: {error}")
             raise
-
-    def is_valid_url(self, url):
-        return validators.url(url)
 
     async def apply_sheet_formatting(self, service, data_row_count):
         try:
             sheet_id = await self.get_sheet_id(service, self.sheet_id)
 
             requests = [
-                # Freeze the header row (A3:D3)
                 {
                     "updateSheetProperties": {
                         "properties": {
                             "sheetId": sheet_id,
                             "gridProperties": {"frozenRowCount": 3},
-                        },  # Freeze up to row 3
+                        },
                         "fields": "gridProperties.frozenRowCount",
                     }
                 },
-                # Format the header row (A3:D3)
                 {
                     "repeatCell": {
-                        "range": {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": 3},  # A3:D3
+                        "range": {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": 3},
                         "cell": {
                             "userEnteredFormat": {
                                 "backgroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0},
@@ -368,7 +338,6 @@ class DVP(commands.Cog):
                         "fields": "userEnteredFormat(backgroundColor,textFormat)",
                     }
                 },
-                # Add hyperlink to the first cell (optional)
                 {
                     "updateCells": {
                         "rows": [
@@ -398,105 +367,89 @@ class DVP(commands.Cog):
             body = {"requests": requests}
             service.spreadsheets().batchUpdate(spreadsheetId=self.sheet_id, body=body).execute()
 
-            self.logger.info("Applied formatting to the Google Sheet.")
+            log_info("Applied formatting to the Google Sheet.")
         except HttpError as e:
-            self.logger.error(f"An error occurred while applying formatting: {e}")
+            log_error(f"An error occurred while applying formatting: {e}")
         except Exception as ex:
-            self.logger.error(f"Unexpected error during sheet formatting: {ex}", exc_info=True)
+            log_error(f"Unexpected error during sheet formatting: {ex}", exc_info=True)
 
     async def get_sheet_id(self, service, spreadsheet_id):
         try:
             sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
             sheets = sheet_metadata.get("sheets", "")
             if not sheets:
-                self.logger.error(f"No sheets found in spreadsheet ID '{spreadsheet_id}'.")
+                log_error(f"No sheets found in spreadsheet ID '{spreadsheet_id}'.")
                 return 0
-            # Optionally, select a sheet by name instead of the first one
             for sheet in sheets:
-                if sheet.get("properties", {}).get("title") == "Sheet1":  # Replace "Sheet1" with your sheet name
+                if sheet.get("properties", {}).get("title") == "Sheet1":
                     return sheet.get("properties", {}).get("sheetId", 0)
-            # Fallback to the first sheet
             sheet_id = sheets[0].get("properties", {}).get("sheetId", 0)
             return sheet_id
         except Exception as e:
-            self.logger.error(f"Error retrieving sheet ID: {e}", exc_info=True)
+            log_error(f"Error retrieving sheet ID: {e}", exc_info=True)
             return 0
 
     async def periodic_scrape_update(self):
         while True:
             try:
-                self.logger.info("Starting periodic web scraping update.")
+                log_info("Starting periodic web scraping update.")
                 await self.scrape_initial_data()
                 await self.save_last_scrape_time()
                 await self.update_initials_mapping()
                 await self.update_google_sheet()
-                self.logger.info("Periodic web scraping update completed.")
+                log_info("Periodic web scraping update completed.")
             except Exception as e:
-                self.logger.error(f"Error during periodic web scraping update: {e}", exc_info=True)
+                log_error(f"Error during periodic web scraping update: {e}", exc_info=True)
             await asyncio.sleep(86400)  # Run once every 24 hours
 
     async def update_initials_mapping(self):
-        # Use only predefined abbreviations
-        self.initials_mapping = {}
-        for abbrev, game_name in self.abbreviation_mapping.items():
-            self.initials_mapping[abbrev.lower()] = game_name
-            self.logger.debug(f"Updated initials mapping: '{abbrev.lower()}' for game '{game_name}'")
+        self.initials_mapping = {abbrev.lower(): game_name for abbrev, game_name in self.abbreviation_mapping.items()}
+        log_info("Updated initials mapping")
 
     @commands.command(name="dvp")
     async def did_vulpes_play_it(self, ctx: commands.Context, *, game_name: str):
-        self.logger.info(f"dvp command called with game: {game_name}")
-        await self.db_initialized.wait()  # Wait for the database to be initialized
+        log_info(f"dvp command called with game: {game_name}")
+        await self.db_initialized.wait()
         try:
-            # Normalize the input
             game_name_normalized = game_name.strip().lower()
-            self.logger.debug(f"Normalized game name: '{game_name_normalized}'")
+            log_info(f"Normalized game name: '{game_name_normalized}'")
 
-            # Check if the input matches any known abbreviations
             if game_name_normalized in self.abbreviation_mapping:
                 game_name_to_search = self.abbreviation_mapping[game_name_normalized]
-                self.logger.debug(
-                    f"Input '{game_name_normalized}' matched to abbreviation mapping '{game_name_to_search}'"
-                )
+                log_info(f"Input '{game_name_normalized}' matched to abbreviation mapping '{game_name_to_search}'")
             else:
-                # Fetch game names from the database
                 async with aiosqlite.connect(self.db_path) as db:
                     async with db.execute("SELECT name FROM games") as cursor:
                         games = await cursor.fetchall()
                 game_names = [game[0] for game in games]
-
-                # Convert all game names to lowercase for matching
                 game_names_lower = [name.lower() for name in game_names]
 
-                # Check for exact matches
                 if game_name_normalized in game_names_lower:
                     index = game_names_lower.index(game_name_normalized)
                     game_name_to_search = game_names[index]
-                    self.logger.debug(f"Exact match found: '{game_name_to_search}'")
+                    log_info(f"Exact match found: '{game_name_to_search}'")
                 else:
-                    # Check for substring matches
                     matches = [
                         original_name
                         for original_name, lower_name in zip(game_names, game_names_lower)
                         if game_name_normalized in lower_name
                     ]
                     if matches:
-                        game_name_to_search = matches[0]  # Choose the first match
-                        self.logger.debug(f"Substring matched '{game_name_normalized}' to '{game_name_to_search}'")
+                        game_name_to_search = matches[0]
+                        log_info(f"Substring matched '{game_name_normalized}' to '{game_name_to_search}'")
                     else:
-                        # Proceed with enhanced fuzzy matching
                         matches = process.extract(
                             game_name_normalized, game_names, scorer=fuzz.token_set_ratio, limit=3
                         )
-                        self.logger.debug(f"Fuzzy matches: {matches}")
+                        log_info(f"Fuzzy matches: {matches}")
                         if matches and matches[0][1] >= 70:
                             game_name_to_search = matches[0][0]
-                            self.logger.debug(f"Fuzzy matched '{game_name_normalized}' to '{game_name_to_search}'")
+                            log_info(f"Fuzzy matched '{game_name_normalized}' to '{game_name_to_search}'")
                         else:
-                            self.logger.warning(f"No matches found for '{game_name}' using fuzzy matching.")
+                            log_warning(f"No matches found for '{game_name}' using fuzzy matching.")
                             await ctx.send(f"@{ctx.author.name}, no games found matching '{game_name}'.")
                             return
 
-            # Fetch game data and send response
             async with aiosqlite.connect(self.db_path) as db:
                 async with db.execute(
                     "SELECT time_played, last_played FROM games WHERE name = ?", (game_name_to_search,)
@@ -510,7 +463,7 @@ class DVP(commands.Cog):
                     last_played_date = datetime.strptime(str(last_played), "%Y-%m-%d")
                     last_played_formatted = last_played_date.strftime("%B %d, %Y")
                 except ValueError as ve:
-                    self.logger.error(f"Error formatting last played date '{last_played}': {ve}", exc_info=True)
+                    log_error(f"Error formatting last played date '{last_played}': {ve}", exc_info=True)
                     last_played_formatted = str(last_played)
                 await ctx.send(
                     f"@{ctx.author.name}, Vulpes played {game_name_to_search} for {formatted_time}. Last played on {last_played_formatted}."
@@ -518,7 +471,7 @@ class DVP(commands.Cog):
             else:
                 await ctx.send(f"@{ctx.author.name}, couldn't find data for {game_name_to_search}.")
         except Exception as e:
-            self.logger.error(f"Error executing dvp command: {e}", exc_info=True)
+            log_error(f"Error executing dvp command: {e}", exc_info=True)
             await ctx.send(
                 f"@{ctx.author.name}, an error occurred while processing your request. Please try again later."
             )
@@ -535,7 +488,7 @@ class DVP(commands.Cog):
                     result = await cursor.fetchone()
                     total_duration = result[0] if result and result[0] else 0
                     total_minutes = total_duration // 60
-                    self.logger.info(f"Total playtime for {game_name}: {self.format_playtime(total_minutes)}")
+                    log_info(f"Total playtime for {game_name}: {self.format_playtime(total_minutes)}")
 
 
 def prepare(bot):

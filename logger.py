@@ -1,111 +1,52 @@
 import logging
 import sys
-import os
 from logging.handlers import RotatingFileHandler
-from threading import Lock
-from logdna import LogDNAHandler
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
-# Use environment variables
-LOGDNA_KEY = os.getenv("LOGDNA_INGESTION_KEY")
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-LOG_FILE = os.getenv("LOG_FILE", "bot.log")
-LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", "5242880"))  # 5 MB
-LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "3"))
-
-# Create a lock for thread safety
-_logger_setup_lock = Lock()
-
-# Define a common formatter for all handlers
-_formatter = logging.Formatter("[%(asctime)s] %(levelname)s:%(name)s: %(message)s")
-
-# Define a new log level for user messages
-USER_MESSAGE_LEVEL = 25
-logging.addLevelName(USER_MESSAGE_LEVEL, "MESSAGE")
+import codecs
 
 
-def setup_logger(name="twitch_bot", level=None, log_file=None, max_bytes=None, backup_count=None):
-    """Setup a centralized logger with log rotation for the bot."""
+def setup_logger(name, log_file="bot.log", level=logging.INFO):
     logger = logging.getLogger(name)
+    logger.setLevel(level)
 
-    # Use default values if not provided
-    level = level or getattr(logging, LOG_LEVEL, logging.INFO)
-    log_file = log_file or LOG_FILE
-    max_bytes = max_bytes or LOG_MAX_BYTES
-    backup_count = backup_count or LOG_BACKUP_COUNT
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-    with _logger_setup_lock:
-        if not logger.handlers:
-            console_handler = create_console_handler(level)
-            file_handler = create_file_handler(log_file, max_bytes, backup_count, level)
-            handlers = [console_handler, file_handler]
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
-            if LOGDNA_KEY:
-                logdna_handler = create_logdna_handler(level)
-                if logdna_handler:
-                    handlers.append(logdna_handler)
-
-            for handler in handlers:
-                logger.addHandler(handler)
-
-            logger.setLevel(level)
+    # File handler with UTF-8 encoding
+    file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
     return logger
 
 
-def create_console_handler(level):
-    """Create a console handler for logging."""
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(_formatter)
-
-    # Explicitly set encoding to 'utf-8' to handle Unicode characters
-    if sys.stdout.encoding.lower() != "utf-8":
-        try:
-            console_handler.setEncoding("utf-8")
-            logging.info("Console handler encoding set to UTF-8.")
-        except AttributeError:
-            # For Python versions < 3.7 where setEncoding might not be available
-            logging.warning("Failed to set console handler encoding to UTF-8. Python version may not support it.")
-
-    return console_handler
-
-
-def create_file_handler(log_file, max_bytes, backup_count, level):
-    """Create a file handler for logging with rotation."""
-    file_handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
-    file_handler.setLevel(level)
-    file_handler.setFormatter(_formatter)
-    return file_handler
-
-
-def create_logdna_handler(level):
-    """Create a LogDNA handler for logging."""
-    if LOGDNA_KEY:
-        logdna_options = {"app": "TwitchBot", "env": "production"}
-        try:
-            logdna_handler = LogDNAHandler(LOGDNA_KEY, options=logdna_options)
-            logdna_handler.setLevel(level)
-            logdna_handler.setFormatter(_formatter)
-            return logdna_handler
-        except Exception as e:
-            print(f"Failed to create LogDNA handler: {e}")
-    return None
-
-
-def log_user_message(logger, message):
-    """Logs user messages for debugging purposes."""
-    if logger.isEnabledFor(USER_MESSAGE_LEVEL):
-        logger.log(USER_MESSAGE_LEVEL, f"User message: {message}")
-
-
-def log_error(logger, message, exc_info=False):
-    """Logs an error message with optional exception information."""
-    logger.error(message, exc_info=exc_info)
-
-
 # Create a global logger instance
-logger = setup_logger()
+logger = setup_logger("twitch_bot")
+
+
+def log_command(command_name, user, channel):
+    """Utility function to log command usage."""
+    logger.info(f"Command '{command_name}' used by {user} in channel {channel}")
+
+
+def log_error(error_message, exc_info=False):
+    """Utility function to log errors."""
+    logger.error(error_message, exc_info=exc_info)
+
+
+def log_info(message):
+    """Utility function to log info messages."""
+    logger.info(message)
+
+
+def log_warning(message):
+    """Utility function to log warning messages."""
+    logger.warning(message)
+
+
+def log_debug(message):
+    """Utility function to log debug messages."""
+    logger.debug(message)

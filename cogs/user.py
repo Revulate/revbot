@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 from twitchio.ext import commands
 from datetime import datetime, timezone
+from utils import normalize_username
 
 load_dotenv()
 
@@ -55,8 +56,8 @@ class User(commands.Cog):
         Usage: #user <username>
         If no username is provided, it shows information about the command user.
         """
-        if not username:
-            username = ctx.author.name
+        if username:
+            username = normalize_username(username)
 
         try:
             # Fetch the target user's information
