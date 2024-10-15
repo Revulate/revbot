@@ -1,3 +1,5 @@
+# twitch_helix_client.py
+
 import aiohttp
 import asyncio
 import datetime
@@ -8,6 +10,7 @@ import os
 import random
 import urllib.parse
 from dotenv import load_dotenv, set_key
+import validators  # Added for URL validation
 
 
 class TwitchAPI:
@@ -237,7 +240,7 @@ class TwitchAPI:
     async def get_game_image_url(self, game_name):
         try:
             url = "https://api.twitch.tv/helix/games"
-            headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.bot.twitch_api.oauth_token}"}
+            headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.oauth_token}"}
             params = {"name": game_name}
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, params=params) as response:

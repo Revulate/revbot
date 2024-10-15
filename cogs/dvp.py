@@ -13,6 +13,9 @@ from googleapiclient.errors import HttpError
 from playwright.async_api import async_playwright
 from tenacity import retry, stop_after_attempt, wait_exponential
 import re  # Added for regex operations
+import validators  # Added for URL validation
+
+from twitch_helix_client import TwitchAPI  # Adjust the import path as necessary
 
 
 class DVP(commands.Cog):
@@ -32,6 +35,16 @@ class DVP(commands.Cog):
             raise ValueError("GOOGLE_SHEET_ID is not set in the environment variables")
         if not self.creds_file:
             raise ValueError("GOOGLE_CREDENTIALS_FILE is not set in the environment variables")
+
+        # Initialize TwitchAPI
+        client_id = os.getenv("TWITCH_CLIENT_ID")
+        client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+        redirect_uri = os.getenv("TWITCH_REDIRECT_URI")
+        if not client_id or not client_secret or not redirect_uri:
+            raise ValueError(
+                "TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, and TWITCH_REDIRECT_URI must be set in environment variables"
+            )
+        self.twitch_api = TwitchAPI(client_id, client_secret, redirect_uri)
 
         # Predefined abbreviations and aliases
         self.abbreviation_mapping = {
@@ -260,13 +273,24 @@ class DVP(commands.Cog):
                 rows = await cursor.fetchall()
 
         # Prepare data for the sheet
-        headers = ["Game Name", "Time Played", "Last Played"]
+        headers = ["Game Image", "Game Name", "Time Played", "Last Played"]
         data = [headers]
 
         for row in rows:
             name, minutes, last_played = row
+            # Correct method call
+            game_image_url = await self.twitch_api.get_game_image_url(name)
+
+            # Validate URL
+            if game_image_url and not self.is_valid_url(game_image_url):
+                self.logger.warning(f"Invalid image URL for game '{name}': {game_image_url}")
+                img_formula = ""
+            else:
+                img_formula = f'=IMAGE("{game_image_url}")' if game_image_url else ""
+
             # Format the time played into days, hours, minutes
             time_played = self.format_playtime(minutes)
+
             # Format the last played date
             try:
                 last_played_date = datetime.strptime(str(last_played), "%Y-%m-%d")
@@ -274,7 +298,8 @@ class DVP(commands.Cog):
             except ValueError as ve:
                 self.logger.error(f"Error formatting last played date '{last_played}': {ve}", exc_info=True)
                 last_played_formatted = str(last_played)
-            data.append([name, time_played, last_played_formatted])
+
+            data.append([img_formula, name, time_played, last_played_formatted])
 
         # Update the data starting from cell A3
         body = {"values": data}
@@ -283,7 +308,7 @@ class DVP(commands.Cog):
             # Clear existing data from A3 onwards
             service.spreadsheets().values().clear(
                 spreadsheetId=self.sheet_id,
-                range="A3:C1000",  # Adjust the end row as needed
+                range="A3:D1000",  # Ensure this matches the number of columns
             ).execute()
 
             # Write the data
@@ -299,20 +324,28 @@ class DVP(commands.Cog):
             self.logger.error(f"An error occurred while updating the Google Sheet: {error}")
             raise
 
+    def is_valid_url(self, url):
+        return validators.url(url)
+
     async def apply_sheet_formatting(self, service, data_row_count):
         try:
             sheet_id = await self.get_sheet_id(service, self.sheet_id)
 
             requests = [
+                # Freeze the header row (A3:D3)
                 {
                     "updateSheetProperties": {
-                        "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
+                        "properties": {
+                            "sheetId": sheet_id,
+                            "gridProperties": {"frozenRowCount": 3},
+                        },  # Freeze up to row 3
                         "fields": "gridProperties.frozenRowCount",
                     }
                 },
+                # Format the header row (A3:D3)
                 {
                     "repeatCell": {
-                        "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
+                        "range": {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": 3},  # A3:D3
                         "cell": {
                             "userEnteredFormat": {
                                 "backgroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0},
@@ -325,6 +358,7 @@ class DVP(commands.Cog):
                         "fields": "userEnteredFormat(backgroundColor,textFormat)",
                     }
                 },
+                # Add hyperlink to the first cell (optional)
                 {
                     "updateCells": {
                         "rows": [
@@ -367,6 +401,11 @@ class DVP(commands.Cog):
             if not sheets:
                 self.logger.error(f"No sheets found in spreadsheet ID '{spreadsheet_id}'.")
                 return 0
+            # Optionally, select a sheet by name instead of the first one
+            for sheet in sheets:
+                if sheet.get("properties", {}).get("title") == "Sheet1":  # Replace "Sheet1" with your sheet name
+                    return sheet.get("properties", {}).get("sheetId", 0)
+            # Fallback to the first sheet
             sheet_id = sheets[0].get("properties", {}).get("sheetId", 0)
             return sheet_id
         except Exception as e:
@@ -488,6 +527,5 @@ class DVP(commands.Cog):
                     total_minutes = total_duration // 60
                     self.logger.info(f"Total playtime for {game_name}: {self.format_playtime(total_minutes)}")
 
-
-def prepare(bot):
-    bot.add_cog(DVP(bot))
+    def prepare(bot):
+        bot.add_cog(DVP(bot))
