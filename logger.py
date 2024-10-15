@@ -39,10 +39,18 @@ def setup_logger(name="twitch_bot", level=None, log_file=None, max_bytes=None, b
 
     with _logger_setup_lock:
         if not logger.handlers:
-            logger.addHandler(create_console_handler(level))
-            logger.addHandler(create_file_handler(log_file, max_bytes, backup_count, level))
+            console_handler = create_console_handler(level)
+            file_handler = create_file_handler(log_file, max_bytes, backup_count, level)
+            handlers = [console_handler, file_handler]
+
             if LOGDNA_KEY:
-                logger.addHandler(create_logdna_handler(level))
+                logdna_handler = create_logdna_handler(level)
+                if logdna_handler:
+                    handlers.append(logdna_handler)
+
+            for handler in handlers:
+                logger.addHandler(handler)
+
             logger.setLevel(level)
 
     return logger
@@ -53,6 +61,16 @@ def create_console_handler(level):
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
     console_handler.setFormatter(_formatter)
+
+    # Explicitly set encoding to 'utf-8' to handle Unicode characters
+    if sys.stdout.encoding.lower() != "utf-8":
+        try:
+            console_handler.setEncoding("utf-8")
+            logging.info("Console handler encoding set to UTF-8.")
+        except AttributeError:
+            # For Python versions < 3.7 where setEncoding might not be available
+            logging.warning("Failed to set console handler encoding to UTF-8. Python version may not support it.")
+
     return console_handler
 
 
@@ -68,9 +86,13 @@ def create_logdna_handler(level):
     """Create a LogDNA handler for logging."""
     if LOGDNA_KEY:
         logdna_options = {"app": "TwitchBot", "env": "production"}
-        logdna_handler = LogDNAHandler(LOGDNA_KEY, options=logdna_options)
-        logdna_handler.setLevel(level)
-        return logdna_handler
+        try:
+            logdna_handler = LogDNAHandler(LOGDNA_KEY, options=logdna_options)
+            logdna_handler.setLevel(level)
+            logdna_handler.setFormatter(_formatter)
+            return logdna_handler
+        except Exception as e:
+            print(f"Failed to create LogDNA handler: {e}")
     return None
 
 

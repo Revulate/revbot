@@ -75,6 +75,9 @@ class TwitchBot(commands.Bot):
         self.twitch_api.refresh_token = self.refresh_token_string
         self.logger.info("TwitchAPI instance created and tokens saved")
 
+        self._connection_retries = 0
+        self._max_retries = 5
+
     async def event_ready(self):
         self.logger.info(f"Logged in as | {self.nick}")
         self.load_tokens_from_file()
@@ -101,6 +104,31 @@ class TwitchBot(commands.Bot):
             else "No refresh token"
         )
         self.logger.info(f"Token expiry: {self.twitch_api.token_expiry}")
+
+    async def start(self):
+        while self._connection_retries < self._max_retries:
+            try:
+                await super().start()
+                break
+            except Exception as e:
+                self._connection_retries += 1
+                self.logger.error(f"Connection attempt {self._connection_retries} failed: {e}")
+                if self._connection_retries < self._max_retries:
+                    await asyncio.sleep(5 * self._connection_retries)  # Exponential backoff
+                else:
+                    self.logger.error("Max retries reached. Unable to connect.")
+                    raise
+
+    async def close(self):
+        try:
+            if self._connection and hasattr(self._connection, "_close"):
+                await self._connection._close()
+            if hasattr(self, "_http") and self._http:
+                await self._http.close()
+        except Exception as e:
+            self.logger.error(f"Error during close: {e}")
+        finally:
+            await super().close()
 
     async def check_token_regularly(self):
         while True:
@@ -218,7 +246,6 @@ class TwitchBot(commands.Bot):
 
 
 async def main():
-    load_dotenv()
     bot = TwitchBot()
 
     while True:

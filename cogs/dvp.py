@@ -1,3 +1,5 @@
+# cogs/dvp.py
+
 import asyncio
 import aiosqlite
 from twitchio.ext import commands
@@ -8,8 +10,9 @@ from fuzzywuzzy import process, fuzz
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import re
 from playwright.async_api import async_playwright
+from tenacity import retry, stop_after_attempt, wait_exponential
+import re  # Added for regex operations
 
 
 class DVP(commands.Cog):
@@ -17,17 +20,13 @@ class DVP(commands.Cog):
         self.bot = bot
         self.db_path = "vulpes_games.db"
         self.channel_name = "vulpeshd"
-        self.client_id = os.getenv("TWITCH_CLIENT_ID")
-        self.client_secret = os.getenv("TWITCH_CLIENT_SECRET")
-        self.logger = bot.logger.getChild("dvp")
+        self.logger = logging.getLogger("twitch_bot.cogs.dvp")  # Use child logger
         self.logger.setLevel(logging.DEBUG)
-        self.update_task = None
-        self.update_recent_games_task = None
+        self.update_scrape_task = None
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE")
         self.db_initialized = asyncio.Event()
         self.last_scrape_time = None
-        self.twitch_api = bot.twitch_api
 
         if not self.sheet_id:
             raise ValueError("GOOGLE_SHEET_ID is not set in the environment variables")
@@ -70,8 +69,7 @@ class DVP(commands.Cog):
         await self.setup_database()
         await self.load_last_scrape_time()
         await self.initialize_data()
-        self.update_task = self.bot.loop.create_task(self.periodic_update())
-        self.update_recent_games_task = self.bot.loop.create_task(self.periodic_recent_games_update())
+        self.update_scrape_task = self.bot.loop.create_task(self.periodic_scrape_update())
         self.logger.info("DVP cog initialized successfully")
 
     async def setup_database(self):
@@ -85,17 +83,6 @@ class DVP(commands.Cog):
                         name TEXT NOT NULL UNIQUE,
                         time_played INTEGER NOT NULL,
                         last_played DATE NOT NULL
-                    )
-                    """
-                )
-                await db.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS streams (
-                        id TEXT PRIMARY KEY,
-                        game_id TEXT,
-                        game_name TEXT,
-                        started_at TEXT,
-                        duration INTEGER
                     )
                     """
                 )
@@ -118,8 +105,12 @@ class DVP(commands.Cog):
             async with db.execute("SELECT value FROM metadata WHERE key = 'last_scrape_time'") as cursor:
                 result = await cursor.fetchone()
                 if result:
-                    self.last_scrape_time = datetime.fromisoformat(result[0])
-                    self.logger.info(f"Last scrape time loaded: {self.last_scrape_time}")
+                    try:
+                        self.last_scrape_time = datetime.fromisoformat(result[0])
+                        self.logger.info(f"Last scrape time loaded: {self.last_scrape_time}")
+                    except ValueError as ve:
+                        self.logger.error(f"Invalid datetime format in metadata: {result[0]}", exc_info=True)
+                        self.last_scrape_time = None
 
     async def save_last_scrape_time(self):
         current_time = datetime.now(timezone.utc)
@@ -141,8 +132,6 @@ class DVP(commands.Cog):
                 await self.save_last_scrape_time()
             else:
                 self.logger.info("Skipping web scraping, using existing data")
-
-            await self.fetch_and_process_recent_videos()
             await self.update_initials_mapping()
             self.db_initialized.set()
             self.logger.info("Data initialization completed successfully.")
@@ -172,17 +161,14 @@ class DVP(commands.Cog):
                         columns = await row.query_selector_all("td")
                         if len(columns) >= 7:
                             name = (await columns[1].inner_text()).strip()
-
-                            time_played_element = await columns[2].query_selector("span")
-                            if time_played_element:
-                                time_played_str = (await time_played_element.inner_text()).strip()
-                            else:
-                                time_played_str = (await columns[2].inner_text()).strip()
-                            self.logger.debug(f"Scraped time_played_str for '{name}': '{time_played_str}'")
-                            time_played_str, time_played = self.parse_time(time_played_str)
-
+                            time_played_str = (await columns[2].inner_text()).strip()
+                            _, time_played = self.parse_time(time_played_str)
                             last_played_str = (await columns[6].inner_text()).strip()
-                            last_played = datetime.strptime(last_played_str, "%d/%b/%Y").date()
+                            try:
+                                last_played = datetime.strptime(last_played_str, "%d/%b/%Y").date()
+                            except ValueError as ve:
+                                self.logger.error(f"Error parsing date '{last_played_str}': {ve}", exc_info=True)
+                                last_played = datetime.now(timezone.utc).date()
                             await db.execute(
                                 """
                                 INSERT INTO games (name, time_played, last_played)
@@ -200,110 +186,34 @@ class DVP(commands.Cog):
         except Exception as e:
             self.logger.error(f"Error during data scraping: {e}", exc_info=True)
 
-    async def fetch_and_process_recent_videos(self):
-        user_id = await self.twitch_api.get_user_id(self.channel_name)
-        if not user_id:
-            self.logger.error(f"Could not find user ID for {self.channel_name}")
-            return
-
-        videos = await self.twitch_api.fetch_recent_videos(user_id)
-        await self.process_video_data(videos)
-
-    async def process_video_data(self, videos):
-        self.logger.info(f"Processing {len(videos)} videos from Twitch API")
-        game_playtimes = {}
-
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("DELETE FROM streams")
-
-            for video in videos:
-                video_id = video["id"]
-                game_name = video.get("game_name")
-                if not game_name or game_name.lower() == "unknown":
-                    continue
-
-                game_id = video.get("game_id", "")
-                created_at = video["created_at"]
-                duration_str = video["duration"]
-                duration = self.parse_duration(duration_str)
-
-                self.logger.debug(f"Video {video_id}: Game: {game_name}, Duration: {duration} seconds")
-
-                if game_name in game_playtimes:
-                    game_playtimes[game_name] += duration
-                else:
-                    game_playtimes[game_name] = duration
-
-                await db.execute(
-                    """
-                    INSERT OR REPLACE INTO streams 
-                    (id, game_id, game_name, started_at, duration) 
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (video_id, game_id, game_name, created_at, duration),
-                )
-
-            await db.commit()
-
-        # Update the games table with the new playtimes
-        async with aiosqlite.connect(self.db_path) as db:
-            for game_name, total_duration in game_playtimes.items():
-                total_minutes = total_duration // 60
-                last_played = datetime.now(timezone.utc).date()
-                self.logger.debug(
-                    f"Updating game: {game_name}, Total duration: {total_duration} seconds, Total minutes: {total_minutes}"
-                )
-                await db.execute(
-                    """
-                    INSERT INTO games (name, time_played, last_played)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(name) DO UPDATE SET
-                        time_played = excluded.time_played,
-                        last_played = excluded.last_played
-                    """,
-                    (game_name, total_minutes, last_played),
-                )
-            await db.commit()
-
-        for game_name in ["FINAL FANTASY VII REBIRTH", "FINAL FANTASY XVI", "ELDEN RING"]:
-            total_minutes = game_playtimes.get(game_name, 0) // 60
-            self.logger.info(f"Total playtime for {game_name}: {self.format_playtime(total_minutes)}")
-
-        self.logger.info("Video data processing and game playtime update completed.")
-
-    def parse_duration(self, duration_str):
-        total_seconds = 0
-        time_parts = duration_str.split("h")
-        if len(time_parts) > 1:
-            hours = int(time_parts[0])
-            total_seconds += hours * 3600
-            duration_str = time_parts[1]
-
-        time_parts = duration_str.split("m")
-        if len(time_parts) > 1:
-            minutes = int(time_parts[0])
-            total_seconds += minutes * 60
-            duration_str = time_parts[1]
-
-        time_parts = duration_str.split("s")
-        if len(time_parts) > 1:
-            seconds = int(time_parts[0])
-            total_seconds += seconds
-
-        return total_seconds
-
     def parse_time(self, time_str):
+        """
+        Parses the time played string and converts it to total minutes.
+        Expected formats:
+        - "596\n20.5%" -> 596 minutes
+        - "0.5\n0%" -> 0.5 hours (30 minutes)
+        - "1 day 2 hours" -> 1560 minutes
+        """
         total_minutes = 0
-        time_str = time_str.replace(",", "").strip()
+        # Remove commas, strip spaces, and split by newline to remove percentage
+        time_str = time_str.replace(",", "").strip().split("\n")[0]
+        # Remove any '%' symbols
+        time_str = time_str.replace("%", "")
         try:
             if "." in time_str:
+                # Assume the value before the newline is in hours
                 hours = float(time_str)
                 total_minutes = int(hours * 60)
             else:
                 parts = time_str.split()
                 i = 0
                 while i < len(parts):
-                    value = float(parts[i])
+                    # Use regex to extract numeric value
+                    value_match = re.match(r"(\d+(\.\d+)?)", parts[i])
+                    if not value_match:
+                        self.logger.error(f"Invalid numeric value in time string '{time_str}'")
+                        break
+                    value = float(value_match.group(1))
                     if i + 1 < len(parts):
                         unit = parts[i + 1].rstrip("s").lower()
                         i += 2
@@ -336,20 +246,6 @@ class DVP(commands.Cog):
             time_played = f"{int(minutes)}m"
         return time_played
 
-    async def update_game_data(self, game_name, time_played):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                INSERT INTO games (name, time_played, last_played)
-                VALUES (?, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET
-                    time_played = time_played + excluded.time_played,
-                    last_played = excluded.last_played
-            """,
-                (game_name, time_played, datetime.now(timezone.utc).date()),
-            )
-            await db.commit()
-
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def update_google_sheet(self):
         creds = Credentials.from_service_account_file(
@@ -364,24 +260,21 @@ class DVP(commands.Cog):
                 rows = await cursor.fetchall()
 
         # Prepare data for the sheet
-        headers = ["Game Image", "Game Name", "Time Played", "Last Played"]
+        headers = ["Game Name", "Time Played", "Last Played"]
         data = [headers]
 
         for row in rows:
             name, minutes, last_played = row
-            game_image_url = await self.twitch_api.get_game_image_url(name)
-
             # Format the time played into days, hours, minutes
             time_played = self.format_playtime(minutes)
-
             # Format the last played date
-            last_played_date = datetime.strptime(str(last_played), "%Y-%m-%d")
-            last_played_formatted = last_played_date.strftime("%B %d, %Y")
-
-            # Prepare the image formula
-            img_formula = f'=IMAGE("{game_image_url}")' if game_image_url else ""
-
-            data.append([img_formula, name, time_played, last_played_formatted])
+            try:
+                last_played_date = datetime.strptime(str(last_played), "%Y-%m-%d")
+                last_played_formatted = last_played_date.strftime("%B %d, %Y")
+            except ValueError as ve:
+                self.logger.error(f"Error formatting last played date '{last_played}': {ve}", exc_info=True)
+                last_played_formatted = str(last_played)
+            data.append([name, time_played, last_played_formatted])
 
         # Update the data starting from cell A3
         body = {"values": data}
@@ -390,7 +283,7 @@ class DVP(commands.Cog):
             # Clear existing data from A3 onwards
             service.spreadsheets().values().clear(
                 spreadsheetId=self.sheet_id,
-                range="A3:D1000",  # Adjust the end row as needed
+                range="A3:C1000",  # Adjust the end row as needed
             ).execute()
 
             # Write the data
@@ -464,64 +357,34 @@ class DVP(commands.Cog):
             self.logger.info("Applied formatting to the Google Sheet.")
         except HttpError as e:
             self.logger.error(f"An error occurred while applying formatting: {e}")
+        except Exception as ex:
+            self.logger.error(f"Unexpected error during sheet formatting: {ex}", exc_info=True)
 
     async def get_sheet_id(self, service, spreadsheet_id):
         try:
             sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
             sheets = sheet_metadata.get("sheets", "")
+            if not sheets:
+                self.logger.error(f"No sheets found in spreadsheet ID '{spreadsheet_id}'.")
+                return 0
             sheet_id = sheets[0].get("properties", {}).get("sheetId", 0)
             return sheet_id
         except Exception as e:
             self.logger.error(f"Error retrieving sheet ID: {e}", exc_info=True)
             return 0
 
-    async def periodic_update(self):
+    async def periodic_scrape_update(self):
         while True:
             try:
-                current_game = await self.twitch_api.get_channel_games(self.channel_name)
-                if current_game:
-                    await self.update_game_data(current_game, 5)  # Update every 5 minutes
-            except Exception as e:
-                self.logger.error(f"Error during periodic update: {e}", exc_info=True)
-            await asyncio.sleep(300)  # Sleep for 5 minutes
-
-    async def periodic_recent_games_update(self):
-        while True:
-            try:
-                await self.fetch_and_process_recent_videos()
-                await self.update_game_playtime()
+                self.logger.info("Starting periodic web scraping update.")
+                await self.scrape_initial_data()
+                await self.save_last_scrape_time()
+                await self.update_initials_mapping()
                 await self.update_google_sheet()
+                self.logger.info("Periodic web scraping update completed.")
             except Exception as e:
-                self.logger.error(f"Error during periodic recent games update: {e}", exc_info=True)
-            await asyncio.sleep(86400)  # Update daily
-
-    async def update_game_playtime(self):
-        async with aiosqlite.connect(self.db_path) as db:
-            # Sum up the durations for each game
-            async with db.execute(
-                """
-                SELECT game_name, SUM(duration)
-                FROM streams
-                GROUP BY game_name
-            """
-            ) as cursor:
-                game_playtimes = await cursor.fetchall()
-
-            for game_name, total_duration in game_playtimes:
-                # Convert total_duration from seconds to minutes
-                total_minutes = total_duration // 60
-                last_played = datetime.now(timezone.utc).date()
-                await db.execute(
-                    """
-                    INSERT INTO games (name, time_played, last_played)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(name) DO UPDATE SET
-                        time_played = excluded.time_played,
-                        last_played = excluded.last_played
-                    """,
-                    (game_name, total_minutes, last_played),
-                )
-            await db.commit()
+                self.logger.error(f"Error during periodic web scraping update: {e}", exc_info=True)
+            await asyncio.sleep(86400)  # Run once every 24 hours
 
     async def update_initials_mapping(self):
         # Use only predefined abbreviations
@@ -594,7 +457,12 @@ class DVP(commands.Cog):
             if result:
                 time_played, last_played = result
                 formatted_time = self.format_playtime(time_played)
-                last_played_formatted = datetime.strptime(str(last_played), "%Y-%m-%d").strftime("%B %d, %Y")
+                try:
+                    last_played_date = datetime.strptime(str(last_played), "%Y-%m-%d")
+                    last_played_formatted = last_played_date.strftime("%B %d, %Y")
+                except ValueError as ve:
+                    self.logger.error(f"Error formatting last played date '{last_played}': {ve}", exc_info=True)
+                    last_played_formatted = str(last_played)
                 await ctx.send(
                     f"@{ctx.author.name}, Vulpes played {game_name_to_search} for {formatted_time}. Last played on {last_played_formatted}."
                 )

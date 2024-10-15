@@ -1,16 +1,17 @@
-# rate.py
+# cogs/rate.py
+
 import random
 from twitchio.ext import commands
-from logger import setup_logger  # Import the centralized logger
-from utils import split_message  # Import the shared split_message function
+import logging
+from utils import split_message  # Ensure this is correctly implemented
 
 
 class Rate(commands.Cog):
-    """Cog for handling various rate-based commands like 'cute', 'gay', 'iq', etc.'"""
+    """Cog for handling various rate-based commands like 'cute', 'gay', 'iq', etc."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.logger = setup_logger("twitch_bot.cogs.rate")  # Reuse the centralized logger
+        self.logger = logging.getLogger("twitch_bot.cogs.rate")  # Use child logger
 
     def get_mentioned_user(self, ctx: commands.Context, mentioned_user: str = None):
         """Helper method to extract a mentioned user or default to the command author."""
@@ -135,7 +136,7 @@ class Rate(commands.Cog):
         messages.append(f"{user} 's pp is {length_str} long and has a {girth_inches}in girth. BillyApprove")
 
         rating = random.randint(0, 10)
-        messages.append(f"{user} is a {rating}/10. {'CHUG' if rating > 5 else 'Hmm'}")
+        messages.append(f"I would give {user} a {rating}/10. {'CHUG' if rating > 5 else 'Hmm'}")
 
         horny_percentage = random.randint(0, 100)
         messages.append(f"{user} is {horny_percentage}% horny right now. {'HORNY' if horny_percentage > 50 else 'Hmm'}")
@@ -144,7 +145,7 @@ class Rate(commands.Cog):
         iq_description = (
             "thoughtless"
             if iq <= 50
-            else "slowpoke" if iq <= 80 else "NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
+            else "a slowpoke" if iq <= 80 else "an NPC" if iq <= 115 else "catNerd" if iq <= 199 else "BrainGalaxy"
         )
         messages.append(f"{user} has {iq} IQ. {iq_description}")
 

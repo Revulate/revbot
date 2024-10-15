@@ -30,7 +30,7 @@ class TwitchAPI:
         """Set an external session for API requests."""
         self.session = session
 
-    async def initialize_session(self):
+    async def ensure_session(self):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
 
@@ -120,7 +120,7 @@ class TwitchAPI:
         return True
 
     async def api_request(self, endpoint, params=None, method="GET", data=None):
-        await self.ensure_token_valid()
+        await self.ensure_session()
 
         url = f"{self.BASE_URL}/{endpoint}"
         headers = {
@@ -245,3 +245,6 @@ class TwitchAPI:
         except Exception as e:
             logger.error(f"Error fetching image URL for {game_name}: {e}")
         return ""
+
+    async def close(self):
+        await self.close_session()
