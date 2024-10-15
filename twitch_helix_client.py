@@ -26,6 +26,10 @@ class TwitchAPI:
         self.session = None
         self.load_tokens()
 
+    def set_session(self, session):
+        """Set an external session for API requests."""
+        self.session = session
+
     async def initialize_session(self):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
@@ -90,18 +94,23 @@ class TwitchAPI:
             "grant_type": "refresh_token",
             "refresh_token": self.refresh_token,
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(self.TOKEN_URL, data=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self.oauth_token = data["access_token"]
-                    self.refresh_token = data.get("refresh_token", self.refresh_token)
-                    self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
-                    self.save_tokens()
-                    return True
-                else:
-                    logger.error(f"Failed to refresh token: {await response.text()}")
-                    return False
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.TOKEN_URL, data=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        self.oauth_token = data["access_token"]
+                        self.refresh_token = data.get("refresh_token", self.refresh_token)
+                        self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
+                        self.save_tokens()
+                        logger.info("OAuth token refreshed successfully")
+                        return True
+                    else:
+                        logger.error(f"Failed to refresh token: {await response.text()}")
+                        return False
+        except Exception as e:
+            logger.error(f"Error during token refresh: {e}", exc_info=True)
+            return False
 
     async def ensure_token_valid(self):
         if not self.oauth_token or (self.token_expiry and datetime.datetime.now() >= self.token_expiry):
@@ -118,7 +127,10 @@ class TwitchAPI:
             "Client-ID": self.client_id,
         }
 
-        async with aiohttp.ClientSession() as session:
+        session = self.session or aiohttp.ClientSession()
+        should_close_session = self.session is None
+
+        try:
             for _ in range(2):  # Try twice: once with current token, once after refreshing
                 try:
                     if method == "GET":
@@ -142,10 +154,14 @@ class TwitchAPI:
                             response.raise_for_status()
                             return await response.json()
                 except aiohttp.ClientResponseError as e:
+                    logger.error(f"API request error: {e}", exc_info=True)
                     if e.status != 401:
                         raise
                 break  # If we get here, we've either succeeded or failed after a refresh
             raise Exception("Failed to complete API request")
+        finally:
+            if should_close_session:
+                await session.close()
 
     async def get_streams(self, user_logins):
         params = {"user_login": user_logins}
@@ -194,3 +210,50 @@ class TwitchAPI:
                         return False
         logger.error("Device code flow timed out")
         return False
+
+    async def fetch_recent_videos(self, user_id, first=100):
+        params = {"user_id": user_id, "first": first, "type": "archive"}
+        try:
+            data = await self.api_request("videos", params=params)
+            logger.info(f"Fetched {len(data['data'])} videos from Twitch API")
+            return data["data"]
+        except Exception as e:
+            logger.error(f"Error fetching recent videos: {e}")
+            return []
+
+    async def get_user_id(self, username):
+        try:
+            users = await self.get_users([username])
+            return users["data"][0]["id"] if users["data"] else None
+        except Exception as e:
+            logger.error(f"Error getting user ID for {username}: {e}")
+            return None
+
+    async def get_channel_games(self, channel_name):
+        try:
+            # First, get the user ID for the given channel name
+            users = await self.get_users([channel_name])
+            if not users or "data" not in users or not users["data"]:
+                logger.error(f"Could not find user ID for channel: {channel_name}")
+                return None
+
+            user_id = users["data"][0]["id"]
+
+            # Now use the user ID to fetch channel info
+            data = await self.api_request(f"channels?broadcaster_id={user_id}")
+            return data["data"][0]["game_name"] if data["data"] else None
+        except Exception as e:
+            logger.error(f"Failed to fetch channel info for {channel_name}: {e}")
+            return None
+
+    async def get_game_image_url(self, game_name):
+        try:
+            params = {"name": game_name}
+            data = await self.api_request("games", params=params)
+            if data["data"]:
+                box_art_url = data["data"][0]["box_art_url"]
+                return box_art_url.replace("{width}", "285").replace("{height}", "380")
+            logger.warning(f"No image found for game: {game_name}")
+        except Exception as e:
+            logger.error(f"Error fetching image URL for {game_name}: {e}")
+        return ""

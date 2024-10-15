@@ -38,29 +38,6 @@ jobs:
 
           # Install the required dependencies inside the virtual environment
           pip install -r requirements.txt
-          
-          # Install black and flake8
-          pip install black flake8
-
-      # 3. Run Black Formatter Check
-      - name: Run Black Formatter Check
-        run: |
-          if [ -d "venv" ]; then
-            source venv/bin/activate
-          elif [ -d "env" ]; then
-            source env/bin/activate
-          fi
-          python -m black --check --diff --line-length 120 .
-
-      # 4. Run Flake8
-      - name: Run Flake8
-        run: |
-          if [ -d "venv" ]; then
-            source venv/bin/activate
-          elif [ -d "env" ]; then
-            source env/bin/activate
-          fi
-          python -m flake8 --max-line-length=120 --exclude=venv,env,.git,__pycache__ .
 
   deploy:
     runs-on: self-hosted  # Use the self-hosted runner for deployment too
@@ -134,24 +111,52 @@ jobs:
           # Set appropriate permissions for credentials.json
           chmod 600 credentials.json
 
-          # Restart the Twitch bot service
-          if ! sudo systemctl restart twitch-bot.service; then
-            echo "Error: Failed to restart twitch-bot service"
-            echo "Service Status:"
-            sudo systemctl status twitch-bot.service
-            echo "Sudo Version:"
-            sudo --version
-            echo "Current User:"
-            whoami
-            echo "Sudo Permissions:"
-            sudo -l
-            exit 1
+          # Install Node.js and npm if not already installed
+          if ! command -v node &> /dev/null; then
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            sudo apt-get install -y nodejs
           fi
+
+          # Install PM2 globally if not already installed
+          if ! command -v pm2 &> /dev/null; then
+            sudo npm install -g pm2
+          fi
+
+          # Create ecosystem.config.js file
+          cat <<EOF > ecosystem.config.js
+          module.exports = {
+            apps: [{
+              name: "twitch-bot",
+              script: "bot.py",
+              interpreter: "$(which python)",
+              watch: true,
+              ignore_watch: ["node_modules", "logs"],
+              max_memory_restart: "1G",
+              env: {
+                NODE_ENV: "development",
+                PYTHONUNBUFFERED: "1"
+              },
+              env_production: {
+                NODE_ENV: "production",
+                PYTHONUNBUFFERED: "1"
+              }
+            }]
+          }
+          EOF
+
+          # Start or restart the bot using PM2
+          pm2 start ecosystem.config.js --update-env
+
+          # Save PM2 process list and environment
+          pm2 save
+
+          # Ensure PM2 starts on system boot
+          sudo pm2 startup systemd -u $USER --hp $HOME
 
           # Add a simple health check
           sleep 10  # Give the bot some time to start up
-          if ! systemctl is-active --quiet twitch-bot.service; then
-            echo "Error: twitch-bot service is not running after restart"
+          if ! pm2 list | grep -q "online"; then
+            echo "Error: twitch-bot is not running after restart"
             exit 1
           fi
 

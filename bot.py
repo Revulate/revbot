@@ -10,6 +10,11 @@ from logger import logger
 from utils import CustomContext
 from twitch_helix_client import TwitchAPI
 import aiohttp
+import sys
+import codecs
+
+sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
+sys.stderr = codecs.getwriter("utf-8")(sys.stderr.buffer, "strict")
 
 # Load environment variables
 load_dotenv()
@@ -33,7 +38,7 @@ COGS = [
 
 
 class TwitchBot(commands.Bot):
-    def __init__(self, loop):
+    def __init__(self):
         self.logger = logger
 
         # Use environment variables
@@ -54,14 +59,13 @@ class TwitchBot(commands.Bot):
             nick=nick,
             prefix=prefix,
             initial_channels=[channel.strip() for channel in channels if channel.strip()],
-            loop=loop,
         )
         self.broadcaster_user_id = os.getenv("BROADCASTER_USER_ID")
         self.bot_user_id = None
         self.context_class = CustomContext
         self.http_session = None
-        self.token_check_task = None
         self.token_file = "twitch_tokens.json"
+        self.token_check_task = None
 
         # Initialize TwitchAPI
         redirect_uri = "http://localhost:3000"  # or whatever you used during authentication
@@ -70,19 +74,37 @@ class TwitchBot(commands.Bot):
         self.twitch_api.refresh_token = self.refresh_token_string
         self.logger.info("TwitchAPI instance created and tokens saved")
 
-    async def start(self):
-        self.token_check_task = self.loop.create_task(self.check_token_regularly())
-        await super().start()
+    async def event_ready(self):
+        self.logger.info(f"Logged in as | {self.nick}")
+        self.load_tokens_from_file()
+        await self.ensure_valid_token()
+        await self.fetch_user_id()
+        await self.fetch_example_streams()
+        self.load_modules()
 
-    async def close(self):
-        if self.token_check_task:
-            self.token_check_task.cancel()
-        await super().close()
+        # Start periodic token checking
+        self.token_check_task = asyncio.create_task(self.check_token_regularly())
+
+        # Test API call
+        try:
+            user_info = await self.twitch_api.get_users([self.nick])
+            self.logger.info(f"Successfully fetched user info: {user_info}")
+        except Exception as e:
+            self.logger.error(f"Error fetching user info: {e}")
+
+        # Check token status
+        self.logger.info(f"Current access token: {self.twitch_api.oauth_token[:10]}...")
+        self.logger.info(
+            f"Current refresh token: {self.twitch_api.refresh_token[:10]}..."
+            if self.twitch_api.refresh_token
+            else "No refresh token"
+        )
+        self.logger.info(f"Token expiry: {self.twitch_api.token_expiry}")
 
     async def check_token_regularly(self):
         while True:
-            await self.ensure_valid_token()
             await asyncio.sleep(3600)  # Check every hour
+            await self.ensure_valid_token()
 
     async def ensure_valid_token(self):
         if not self.twitch_api.token_expiry or datetime.now() >= self.twitch_api.token_expiry - timedelta(minutes=10):
@@ -95,7 +117,6 @@ class TwitchBot(commands.Bot):
         if success:
             self.token = self.twitch_api.oauth_token
             self.refresh_token_string = self.twitch_api.refresh_token
-            self._connection._token = self.token
             self.logger.info("Access token refreshed successfully")
 
             # Update .env file
@@ -130,54 +151,6 @@ class TwitchBot(commands.Bot):
             if expiry:
                 self.twitch_api.token_expiry = datetime.fromisoformat(expiry)
 
-    async def event_ready(self):
-        self.logger.info(f"Logged in as | {self.nick}")
-        self.load_tokens_from_file()
-        await self.ensure_valid_token()
-        await self.fetch_user_id()
-        await self.fetch_example_streams()
-        self.load_modules()
-
-        # Test API call
-        try:
-            user_info = await self.twitch_api.get_users([self.nick])
-            self.logger.info(f"Successfully fetched user info: {user_info}")
-        except Exception as e:
-            self.logger.error(f"Error fetching user info: {e}")
-
-        # Check token status
-        self.logger.info(f"Current access token: {self.twitch_api.oauth_token[:10]}...")
-        self.logger.info(
-            f"Current refresh token: {self.twitch_api.refresh_token[:10]}..."
-            if self.twitch_api.refresh_token
-            else "No refresh token"
-        )
-        self.logger.info(f"Token expiry: {self.twitch_api.token_expiry}")
-
-    async def run(self):
-        """Run the bot with authentication setup and error handling."""
-        try:
-            await self.create_session()
-            while True:
-                try:
-                    await self.start()
-                except AuthenticationError as e:
-                    self.logger.error(f"Authentication Error: {e}. Attempting to refresh token...")
-                    self.logger.debug(f"Type of self.refresh_token: {type(self.refresh_token)}")
-                    if await self.refresh_token():
-                        continue
-                    else:
-                        self.logger.error("Failed to refresh token. Exiting...")
-                        break
-                except Exception as e:
-                    self.logger.error(f"An unexpected error occurred: {e}", exc_info=True)
-                    await asyncio.sleep(60)  # Wait before attempting to restart
-                else:
-                    break  # If no exception occurs, break the loop
-        finally:
-            if self.http_session:
-                await self.http_session.close()
-
     def _check_env_variables(self):
         """Check for missing critical environment variables."""
         required_vars = ["ACCESS_TOKEN", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "BOT_NICK", "REFRESH_TOKEN"]
@@ -186,14 +159,6 @@ class TwitchBot(commands.Bot):
             error_msg = f"The following environment variables are missing: {', '.join(missing_vars)}"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
-
-    async def create_session(self):
-        if self.http_session is None or self.http_session.closed:
-            self.http_session = aiohttp.ClientSession()
-        self.twitch_api.session = self.http_session
-
-    async def event_channel_joined(self, channel):
-        self.logger.info(f"Joined channel: {channel.name}")
 
     async def fetch_user_id(self):
         retries = 3
@@ -232,49 +197,43 @@ class TwitchBot(commands.Bot):
             try:
                 self.logger.info(f"Attempting to load extension: {cog}")
                 self.load_module(cog)
-                cog_name = cog.split(".")[-1]
-                self.logger.info(f"Loaded extension: {cog_name}")
-
-                # Log all commands after loading each cog
-                all_commands = [cmd.name for cmd in self.commands.values() if isinstance(cmd, commands.Command)]
-                self.logger.info(f"Current commands after loading {cog_name}: {', '.join(all_commands)}")
-
-                # Get the cog instance using case-insensitive matching
-                cog_instance = next((cog for name, cog in self.cogs.items() if name.lower() == cog_name.lower()), None)
-                if cog_instance:
-                    # Get commands associated with the cog
-                    cog_commands = [cmd.name for cmd in self.commands.values() if cmd.cog == cog_instance]
-                    if cog_commands:
-                        self.logger.info(f"Commands added by {cog_name}: {', '.join(cog_commands)}")
-                    else:
-                        self.logger.warning(f"No commands found for cog {cog_name}")
-                else:
-                    self.logger.warning(f"Could not find cog instance for {cog_name}")
-                    self.logger.debug(f"Available cogs: {list(self.cogs.keys())}")
+                self.logger.info(f"Loaded extension: {cog}")
             except Exception as e:
-                self.logger.error(f"Failed to load extension {cog}: {e}", exc_info=True)
-
-        # Log all commands after loading all cogs
-        all_commands = [cmd.name for cmd in self.commands.values() if isinstance(cmd, commands.Command)]
-        self.logger.info(f"All commands after loading all cogs: {', '.join(all_commands)}")
+                self.logger.error(f"Failed to load extension {cog}: {e}")
 
     @commands.command(name="listcommands")
     async def list_commands(self, ctx: commands.Context):
         command_list = [cmd.name for cmd in self.commands.values()]
         await ctx.send(f"Available commands: {', '.join(command_list)}")
 
+    async def event_error(self, error: Exception, data: str = None):
+        """
+        Handles errors in the bot's event loop.
+        """
+        self.logger.error(f"Error in event loop: {error}")
+        self.logger.error(f"Error traceback: {traceback.format_exc()}")
+        if data:
+            self.logger.error(f"Error data: {data}")
+
 
 async def main():
-    loop = asyncio.get_event_loop()
-    bot = TwitchBot(loop)
+    load_dotenv()
+    bot = TwitchBot()
 
-    try:
-        await bot.run()
-    except KeyboardInterrupt:
-        await bot.close()
-    finally:
-        if bot.http_session:
-            await bot.http_session.close()
+    while True:
+        try:
+            await bot.start()
+        except AuthenticationError:
+            logger.error("Authentication failed. Refreshing token and retrying...")
+            await bot.twitch_api.refresh_oauth_token()
+            continue
+        except Exception as e:
+            logger.error(f"An unexpected error occurred: {e}")
+            logger.error(f"Error traceback: {traceback.format_exc()}")
+            logger.info("Attempting to restart the bot in 60 seconds...")
+            await asyncio.sleep(60)
+        else:
+            break
 
 
 if __name__ == "__main__":

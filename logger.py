@@ -1,5 +1,3 @@
-# logger.py
-
 import logging
 import sys
 import os
@@ -15,7 +13,7 @@ load_dotenv()
 LOGDNA_KEY = os.getenv("LOGDNA_INGESTION_KEY")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FILE = os.getenv("LOG_FILE", "bot.log")
-LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", "5242880"))
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", "5242880"))  # 5 MB
 LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "3"))
 
 # Create a lock for thread safety
@@ -80,6 +78,11 @@ def log_user_message(logger, message):
     """Logs user messages for debugging purposes."""
     if logger.isEnabledFor(USER_MESSAGE_LEVEL):
         logger.log(USER_MESSAGE_LEVEL, f"User message: {message}")
+
+
+def log_error(logger, message, exc_info=False):
+    """Logs an error message with optional exception information."""
+    logger.error(message, exc_info=exc_info)
 
 
 # Create a global logger instance

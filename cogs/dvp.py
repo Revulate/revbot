@@ -2,8 +2,7 @@ import asyncio
 import aiosqlite
 from twitchio.ext import commands
 import os
-import aiohttp
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 from fuzzywuzzy import process, fuzz
 from google.oauth2.service_account import Credentials
@@ -27,6 +26,8 @@ class DVP(commands.Cog):
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE")
         self.db_initialized = asyncio.Event()
+        self.last_scrape_time = None
+        self.twitch_api = bot.twitch_api
 
         if not self.sheet_id:
             raise ValueError("GOOGLE_SHEET_ID is not set in the environment variables")
@@ -56,7 +57,6 @@ class DVP(commands.Cog):
             "tw3": "The Witcher 3: Wild Hunt",
             "witcher 3": "The Witcher 3: Wild Hunt",
             "boneworks": "BONEWORKS",
-            # Add more as needed
         }
 
         self.sheet_url = os.getenv("GOOGLE_SHEET_URL")
@@ -68,16 +68,11 @@ class DVP(commands.Cog):
     async def initialize_cog(self):
         self.logger.info("DVP cog is initializing")
         await self.setup_database()
+        await self.load_last_scrape_time()
         await self.initialize_data()
         self.update_task = self.bot.loop.create_task(self.periodic_update())
         self.update_recent_games_task = self.bot.loop.create_task(self.periodic_recent_games_update())
         self.logger.info("DVP cog initialized successfully")
-
-    async def cog_unload(self):
-        if self.update_task:
-            self.update_task.cancel()
-        if self.update_recent_games_task:
-            self.update_recent_games_task.cancel()
 
     async def setup_database(self):
         self.logger.info(f"Setting up database at {self.db_path}")
@@ -93,7 +88,6 @@ class DVP(commands.Cog):
                     )
                     """
                 )
-                # Add a new table to store stream data
                 await db.execute(
                     """
                     CREATE TABLE IF NOT EXISTS streams (
@@ -105,20 +99,50 @@ class DVP(commands.Cog):
                     )
                     """
                 )
+                await db.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS metadata (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                    """
+                )
                 await db.commit()
             self.logger.info("Database setup complete")
         except Exception as e:
             self.logger.error(f"Error setting up database: {e}", exc_info=True)
             raise
 
+    async def load_last_scrape_time(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT value FROM metadata WHERE key = 'last_scrape_time'") as cursor:
+                result = await cursor.fetchone()
+                if result:
+                    self.last_scrape_time = datetime.fromisoformat(result[0])
+                    self.logger.info(f"Last scrape time loaded: {self.last_scrape_time}")
+
+    async def save_last_scrape_time(self):
+        current_time = datetime.now(timezone.utc)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+                ("last_scrape_time", current_time.isoformat()),
+            )
+            await db.commit()
+        self.last_scrape_time = current_time
+        self.logger.info(f"Last scrape time saved: {self.last_scrape_time}")
+
     async def initialize_data(self):
         try:
-            self.logger.info("Initializing data from web scraping.")
-            # First, scrape initial historical data
-            await self.scrape_initial_data()
-            # Then, fetch recent videos from Twitch API
-            await self.fetch_recent_videos()
-            await self.update_game_playtime()
+            self.logger.info("Initializing data")
+            if not self.last_scrape_time or (datetime.now(timezone.utc) - self.last_scrape_time) > timedelta(days=7):
+                self.logger.info("Performing initial web scraping")
+                await self.scrape_initial_data()
+                await self.save_last_scrape_time()
+            else:
+                self.logger.info("Skipping web scraping, using existing data")
+
+            await self.fetch_and_process_recent_videos()
             await self.update_initials_mapping()
             self.db_initialized.set()
             self.logger.info("Data initialization completed successfully.")
@@ -173,103 +197,100 @@ class DVP(commands.Cog):
 
                 await browser.close()
                 self.logger.info("Initial data scraping completed and data inserted into the database.")
-            await self.update_initials_mapping()
         except Exception as e:
             self.logger.error(f"Error during data scraping: {e}", exc_info=True)
 
-    async def fetch_recent_videos(self):
-        user_id = await self.get_user_id(self.channel_name)
-        url = "https://api.twitch.tv/helix/videos"
-        params = {"user_id": user_id, "first": 100, "type": "archive"}  # 'type': 'archive' fetches past broadcasts
+    async def fetch_and_process_recent_videos(self):
+        user_id = await self.twitch_api.get_user_id(self.channel_name)
+        if not user_id:
+            self.logger.error(f"Could not find user ID for {self.channel_name}")
+            return
 
-        headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.bot.twitch_api.oauth_token}"}
-
-        async with aiohttp.ClientSession() as session:
-            while True:
-                async with session.get(url, params=params, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        await self.process_video_data(data["data"])
-                        # Handle pagination
-                        if "pagination" in data and "cursor" in data["pagination"]:
-                            params["after"] = data["pagination"]["cursor"]
-                        else:
-                            break
-                    else:
-                        self.logger.error(f"Failed to fetch recent videos: {response.status}")
-                        break
+        videos = await self.twitch_api.fetch_recent_videos(user_id)
+        await self.process_video_data(videos)
 
     async def process_video_data(self, videos):
+        self.logger.info(f"Processing {len(videos)} videos from Twitch API")
+        game_playtimes = {}
+
         async with aiosqlite.connect(self.db_path) as db:
-            # Clear the streams table to prevent cumulative addition
             await db.execute("DELETE FROM streams")
-            await db.commit()
 
             for video in videos:
                 video_id = video["id"]
                 game_name = video.get("game_name")
                 if not game_name or game_name.lower() == "unknown":
-                    continue  # Skip videos without a valid game name
+                    continue
 
                 game_id = video.get("game_id", "")
                 created_at = video["created_at"]
-                duration_str = video["duration"]  # e.g., '2h15m42s'
-                duration = self.parse_duration(duration_str)  # Convert to seconds
+                duration_str = video["duration"]
+                duration = self.parse_duration(duration_str)
+
+                self.logger.debug(f"Video {video_id}: Game: {game_name}, Duration: {duration} seconds")
+
+                if game_name in game_playtimes:
+                    game_playtimes[game_name] += duration
+                else:
+                    game_playtimes[game_name] = duration
 
                 await db.execute(
                     """
                     INSERT OR REPLACE INTO streams 
                     (id, game_id, game_name, started_at, duration) 
                     VALUES (?, ?, ?, ?, ?)
-                """,
+                    """,
                     (video_id, game_id, game_name, created_at, duration),
+                )
+
+            await db.commit()
+
+        # Update the games table with the new playtimes
+        async with aiosqlite.connect(self.db_path) as db:
+            for game_name, total_duration in game_playtimes.items():
+                total_minutes = total_duration // 60
+                last_played = datetime.now(timezone.utc).date()
+                self.logger.debug(
+                    f"Updating game: {game_name}, Total duration: {total_duration} seconds, Total minutes: {total_minutes}"
+                )
+                await db.execute(
+                    """
+                    INSERT INTO games (name, time_played, last_played)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        time_played = excluded.time_played,
+                        last_played = excluded.last_played
+                    """,
+                    (game_name, total_minutes, last_played),
                 )
             await db.commit()
 
+        for game_name in ["FINAL FANTASY VII REBIRTH", "FINAL FANTASY XVI", "ELDEN RING"]:
+            total_minutes = game_playtimes.get(game_name, 0) // 60
+            self.logger.info(f"Total playtime for {game_name}: {self.format_playtime(total_minutes)}")
+
+        self.logger.info("Video data processing and game playtime update completed.")
+
     def parse_duration(self, duration_str):
         total_seconds = 0
-        matches = re.findall(r"(\d+)([hms])", duration_str)
-        for value, unit in matches:
-            if unit == "h":
-                total_seconds += int(value) * 3600
-            elif unit == "m":
-                total_seconds += int(value) * 60
-            elif unit == "s":
-                total_seconds += int(value)
+        time_parts = duration_str.split("h")
+        if len(time_parts) > 1:
+            hours = int(time_parts[0])
+            total_seconds += hours * 3600
+            duration_str = time_parts[1]
+
+        time_parts = duration_str.split("m")
+        if len(time_parts) > 1:
+            minutes = int(time_parts[0])
+            total_seconds += minutes * 60
+            duration_str = time_parts[1]
+
+        time_parts = duration_str.split("s")
+        if len(time_parts) > 1:
+            seconds = int(time_parts[0])
+            total_seconds += seconds
+
         return total_seconds
-
-    def generate_initials(self, title):
-        title_cleaned = re.sub(r"[^A-Za-z0-9 ]+", "", title)
-        words = title_cleaned.strip().split()
-        initials_list = []
-        for word in words:
-            word_upper = word.upper()
-            if self.is_roman_numeral(word_upper):
-                numeral = self.roman_to_int(word_upper)
-                initials_list.append(numeral)
-            elif word.isdigit():
-                initials_list.append(word)
-            else:
-                initials_list.append(word[0].upper())
-        initials = "".join(initials_list)
-        return initials.lower()
-
-    def is_roman_numeral(self, s):
-        return bool(re.fullmatch(r"M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})", s.upper()))
-
-    def roman_to_int(self, s):
-        roman_dict = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
-        s = s.upper()
-        total = 0
-        prev_value = 0
-        for char in reversed(s):
-            value = roman_dict.get(char, 0)
-            if value < prev_value:
-                total -= value
-            else:
-                total += value
-                prev_value = value
-        return str(total)
 
     def parse_time(self, time_str):
         total_minutes = 0
@@ -315,23 +336,6 @@ class DVP(commands.Cog):
             time_played = f"{int(minutes)}m"
         return time_played
 
-    async def get_channel_games(self):
-        user_id = await self.get_user_id(self.channel_name)
-        url = f"https://api.twitch.tv/helix/channels?broadcaster_id={user_id}"
-        headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.bot.twitch_api.oauth_token}"}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["data"][0]["game_name"] if data["data"] else None
-                else:
-                    self.logger.error(f"Failed to fetch channel info: {response.status}")
-                    return None
-
-    async def get_user_id(self, username):
-        users = await self.bot.fetch_users(names=[username])
-        return users[0].id if users else None
-
     async def update_game_data(self, game_name, time_played):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -364,7 +368,7 @@ class DVP(commands.Cog):
 
         for row in rows:
             name, minutes, last_played = row
-            game_image_url = await self.get_game_image_url(name)  # Fetch the image URL
+            game_image_url = await self.twitch_api.get_game_image_url(name)
 
             # Format the time played into days, hours, minutes
             time_played = self.format_playtime(minutes)
@@ -400,48 +404,32 @@ class DVP(commands.Cog):
         except HttpError as error:
             self.logger.error(f"An error occurred while updating the Google Sheet: {error}")
 
-    async def get_game_image_url(self, game_name):
-        try:
-            url = "https://api.twitch.tv/helix/games"
-            headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.bot.twitch_api.oauth_token}"}
-            params = {"name": game_name}
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data["data"]:
-                            box_art_url = data["data"][0]["box_art_url"]
-                            # Replace placeholder dimensions with actual values
-                            return box_art_url.replace("{width}", "285").replace("{height}", "380")
-            self.logger.warning(f"No image found for game: {game_name}")
-        except Exception as e:
-            self.logger.error(f"Error fetching image URL for {game_name}: {e}", exc_info=True)
-        return ""
-
     async def apply_sheet_formatting(self, service, data_row_count):
         try:
             sheet_id = await self.get_sheet_id(service, self.sheet_id)
 
-            requests = []
-
-            # Merge cells A1:D1 and set the value with hyperlink
-            requests.append(
+            requests = [
                 {
-                    "mergeCells": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 0,
-                            "endRowIndex": 1,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": 4,
-                        },
-                        "mergeType": "MERGE_ALL",
+                    "updateSheetProperties": {
+                        "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
+                        "fields": "gridProperties.frozenRowCount",
                     }
-                }
-            )
-
-            # Set the value of merged cells A1:D1 with hyperlink
-            requests.append(
+                },
+                {
+                    "repeatCell": {
+                        "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0},
+                                "textFormat": {
+                                    "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+                                    "bold": True,
+                                },
+                            }
+                        },
+                        "fields": "userEnteredFormat(backgroundColor,textFormat)",
+                    }
+                },
                 {
                     "updateCells": {
                         "rows": [
@@ -449,148 +437,25 @@ class DVP(commands.Cog):
                                 "values": [
                                     {
                                         "userEnteredValue": {
-                                            "formulaValue": '=HYPERLINK("https://twitch.tv/VulpesHD", "VulpesHD")'
+                                            "formulaValue": f'=HYPERLINK("https://twitch.tv/{self.channel_name}", "VulpesHD")'
                                         },
-                                        "userEnteredFormat": {
-                                            "horizontalAlignment": "CENTER",
-                                            "textFormat": {"fontSize": 24, "bold": True},
-                                        },
+                                        "userEnteredFormat": {"textFormat": {"bold": True, "fontSize": 14}},
                                     }
                                 ]
                             }
                         ],
-                        "fields": "userEnteredValue,userEnteredFormat",
-                        "start": {"sheetId": sheet_id, "rowIndex": 0, "columnIndex": 0},
-                    }
-                }
-            )
-
-            # Merge cells A2:D2 and set the "Last Updated" text
-            current_date = datetime.now().strftime("%B %d, %Y %H:%M:%S")
-            requests.append(
-                {
-                    "mergeCells": {
+                        "fields": "userEnteredValue,userEnteredFormat.textFormat",
                         "range": {
                             "sheetId": sheet_id,
-                            "startRowIndex": 1,
-                            "endRowIndex": 2,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1,
                             "startColumnIndex": 0,
-                            "endColumnIndex": 4,
+                            "endColumnIndex": 1,
                         },
-                        "mergeType": "MERGE_ALL",
                     }
-                }
-            )
+                },
+            ]
 
-            # Set the value of merged cells A2:D2
-            requests.append(
-                {
-                    "updateCells": {
-                        "rows": [
-                            {
-                                "values": [
-                                    {
-                                        "userEnteredValue": {"stringValue": f"Last Updated: {current_date}"},
-                                        "userEnteredFormat": {
-                                            "horizontalAlignment": "CENTER",
-                                            "textFormat": {"fontSize": 12, "italic": True},
-                                        },
-                                    }
-                                ]
-                            }
-                        ],
-                        "fields": "userEnteredValue,userEnteredFormat",
-                        "start": {"sheetId": sheet_id, "rowIndex": 1, "columnIndex": 0},
-                    }
-                }
-            )
-
-            # Adjust row heights for data rows
-            requests.append(
-                {
-                    "updateDimensionProperties": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "dimension": "ROWS",
-                            "startIndex": 3,  # Data starts from row index 3 (Row 4)
-                            "endIndex": 3 + data_row_count - 1,  # Adjust based on data length
-                        },
-                        "properties": {"pixelSize": 147},
-                        "fields": "pixelSize",
-                    }
-                }
-            )
-
-            # Resize columns A-D
-            column_sizes = [110, 287, 255, 198]
-            for idx, size in enumerate(column_sizes):
-                requests.append(
-                    {
-                        "updateDimensionProperties": {
-                            "range": {
-                                "sheetId": sheet_id,
-                                "dimension": "COLUMNS",
-                                "startIndex": idx,
-                                "endIndex": idx + 1,
-                            },
-                            "properties": {"pixelSize": size},
-                            "fields": "pixelSize",
-                        }
-                    }
-                )
-
-            # Apply date formatting to "Last Played" column (Column D)
-            requests.append(
-                {
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 3,  # Data starts from row index 3
-                            "endRowIndex": 3 + data_row_count - 1,
-                            "startColumnIndex": 3,  # Column D
-                            "endColumnIndex": 4,
-                        },
-                        "cell": {"userEnteredFormat": {"numberFormat": {"type": "DATE", "pattern": "MMMM dd, yyyy"}}},
-                        "fields": "userEnteredFormat.numberFormat",
-                    }
-                }
-            )
-
-            # Center align headers and make them bold
-            requests.append(
-                {
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 2,  # Headers are in row index 2 (Row 3)
-                            "endRowIndex": 3,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": 4,
-                        },
-                        "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER", "textFormat": {"bold": True}}},
-                        "fields": "userEnteredFormat(horizontalAlignment,textFormat)",
-                    }
-                }
-            )
-
-            # Center align data cells
-            requests.append(
-                {
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 3,
-                            "endRowIndex": 3 + data_row_count - 1,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": 4,
-                        },
-                        "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                        "fields": "userEnteredFormat.horizontalAlignment",
-                    }
-                }
-            )
-
-            # Send the batch update
             body = {"requests": requests}
             service.spreadsheets().batchUpdate(spreadsheetId=self.sheet_id, body=body).execute()
 
@@ -611,7 +476,7 @@ class DVP(commands.Cog):
     async def periodic_update(self):
         while True:
             try:
-                current_game = await self.get_channel_games()
+                current_game = await self.twitch_api.get_channel_games(self.channel_name)
                 if current_game:
                     await self.update_game_data(current_game, 5)  # Update every 5 minutes
             except Exception as e:
@@ -621,7 +486,7 @@ class DVP(commands.Cog):
     async def periodic_recent_games_update(self):
         while True:
             try:
-                await self.fetch_recent_videos()
+                await self.fetch_and_process_recent_videos()
                 await self.update_game_playtime()
                 await self.update_google_sheet()
             except Exception as e:
@@ -743,6 +608,15 @@ class DVP(commands.Cog):
     async def show_google_sheet(self, ctx: commands.Context):
         """Responds with the viewable URL to the Google Sheet."""
         await ctx.send(f"@{ctx.author.name}, you can view Vulpes's game stats here: {self.sheet_url}")
+
+    async def log_total_playtime_for_games(self, game_names):
+        async with aiosqlite.connect(self.db_path) as db:
+            for game_name in game_names:
+                async with db.execute("SELECT SUM(duration) FROM streams WHERE game_name = ?", (game_name,)) as cursor:
+                    result = await cursor.fetchone()
+                    total_duration = result[0] if result and result[0] else 0
+                    total_minutes = total_duration // 60
+                    self.logger.info(f"Total playtime for {game_name}: {self.format_playtime(total_minutes)}")
 
 
 def prepare(bot):
