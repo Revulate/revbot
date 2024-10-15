@@ -14,12 +14,14 @@ from playwright.async_api import async_playwright
 from tenacity import retry, stop_after_attempt, wait_exponential
 import re  # Added for regex operations
 import validators  # Added for URL validation
+from dotenv import load_dotenv  # Added to load environment variables
 
 from twitch_helix_client import TwitchAPI  # Adjust the import path as necessary
 
 
 class DVP(commands.Cog):
     def __init__(self, bot):
+        load_dotenv()  # Load environment variables from .env file
         self.bot = bot
         self.db_path = "vulpes_games.db"
         self.channel_name = "vulpeshd"
@@ -527,5 +529,6 @@ class DVP(commands.Cog):
                     total_minutes = total_duration // 60
                     self.logger.info(f"Total playtime for {game_name}: {self.format_playtime(total_minutes)}")
 
-    def prepare(bot):
-        bot.add_cog(DVP(bot))
+
+def prepare(bot):
+    bot.add_cog(DVP(bot))

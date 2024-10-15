@@ -27,6 +27,7 @@ class TwitchAPI:
         self.refresh_token = None
         self.token_expiry = None
         self.session = None
+        self.logger = logger
         self.load_tokens()
 
     def set_session(self, session):
@@ -83,12 +84,12 @@ class TwitchAPI:
                     self.save_tokens()
                     return True
                 else:
-                    logger.error(f"Failed to exchange code for token: {await response.text()}")
+                    self.logger.error(f"Failed to exchange code for token: {await response.text()}")
                     return False
 
     async def refresh_oauth_token(self):
         if not self.refresh_token:
-            logger.error("No refresh token available")
+            self.logger.error("No refresh token available")
             return False
 
         params = {
@@ -106,13 +107,13 @@ class TwitchAPI:
                         self.refresh_token = data.get("refresh_token", self.refresh_token)
                         self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
                         self.save_tokens()
-                        logger.info("OAuth token refreshed successfully")
+                        self.logger.info("OAuth token refreshed successfully")
                         return True
                     else:
-                        logger.error(f"Failed to refresh token: {await response.text()}")
+                        self.logger.error(f"Failed to refresh token: {await response.text()}")
                         return False
         except Exception as e:
-            logger.error(f"Error during token refresh: {e}", exc_info=True)
+            self.logger.error(f"Error during token refresh: {e}", exc_info=True)
             return False
 
     async def ensure_token_valid(self):
@@ -169,7 +170,7 @@ class TwitchAPI:
                 if response.status == 200:
                     return await response.json()
                 else:
-                    logger.error(f"Failed to start device auth flow: {await response.text()}")
+                    self.logger.error(f"Failed to start device auth flow: {await response.text()}")
                     return None
 
     async def poll_for_device_code_token(self, device_code, interval, expires_in):
@@ -194,22 +195,22 @@ class TwitchAPI:
                         if error.get("message") == "authorization_pending":
                             await asyncio.sleep(interval)
                         else:
-                            logger.error(f"Device code error: {error}")
+                            self.logger.error(f"Device code error: {error}")
                             return False
                     else:
-                        logger.error(f"Unexpected response: {await response.text()}")
+                        self.logger.error(f"Unexpected response: {await response.text()}")
                         return False
-        logger.error("Device code flow timed out")
+        self.logger.error("Device code flow timed out")
         return False
 
     async def fetch_recent_videos(self, user_id, first=100):
         params = {"user_id": user_id, "first": first, "type": "archive"}
         try:
             data = await self.api_request("videos", params=params)
-            logger.info(f"Fetched {len(data['data'])} videos from Twitch API")
+            self.logger.info(f"Fetched {len(data['data'])} videos from Twitch API")
             return data["data"]
         except Exception as e:
-            logger.error(f"Error fetching recent videos: {e}")
+            self.logger.error(f"Error fetching recent videos: {e}")
             return []
 
     async def get_user_id(self, username):
@@ -217,7 +218,7 @@ class TwitchAPI:
             users = await self.get_users([username])
             return users["data"][0]["id"] if users["data"] else None
         except Exception as e:
-            logger.error(f"Error getting user ID for {username}: {e}")
+            self.logger.error(f"Error getting user ID for {username}: {e}")
             return None
 
     async def get_channel_games(self, channel_name):
@@ -225,7 +226,7 @@ class TwitchAPI:
             # First, get the user ID for the given channel name
             users = await self.get_users([channel_name])
             if not users or "data" not in users or not users["data"]:
-                logger.error(f"Could not find user ID for channel: {channel_name}")
+                self.logger.error(f"Could not find user ID for channel: {channel_name}")
                 return None
 
             user_id = users["data"][0]["id"]
@@ -234,7 +235,7 @@ class TwitchAPI:
             data = await self.api_request(f"channels?broadcaster_id={user_id}")
             return data["data"][0]["game_name"] if data["data"] else None
         except Exception as e:
-            logger.error(f"Failed to fetch channel info for {channel_name}: {e}")
+            self.logger.error(f"Failed to fetch channel info for {channel_name}: {e}")
             return None
 
     async def get_game_image_url(self, game_name):
@@ -249,11 +250,20 @@ class TwitchAPI:
                         if data["data"]:
                             box_art_url = data["data"][0]["box_art_url"]
                             # Replace placeholder dimensions with actual values
-                            return box_art_url.replace("{width}", "285").replace("{height}", "380")
+                            formatted_url = box_art_url.replace("{width}", "285").replace("{height}", "380")
+                            if self.is_valid_url(formatted_url):
+                                self.logger.debug(f"Generated image URL for '{game_name}': {formatted_url}")
+                                return formatted_url
+                            else:
+                                self.logger.warning(f"Invalid image URL generated for '{game_name}': {formatted_url}")
             self.logger.warning(f"No image found for game: {game_name}")
         except Exception as e:
             self.logger.error(f"Error fetching image URL for {game_name}: {e}", exc_info=True)
         return ""
+
+    def is_valid_url(self, url):
+        """Validates if the provided string is a valid URL."""
+        return validators.url(url)
 
     async def close(self):
         await self.close_session()
