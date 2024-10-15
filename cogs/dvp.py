@@ -34,14 +34,22 @@ class DVP(commands.Cog):
         self.last_scrape_time = None
 
         if not self.sheet_id:
+            self.logger.error("GOOGLE_SHEET_ID is not set in the environment variables")
             raise ValueError("GOOGLE_SHEET_ID is not set in the environment variables")
         if not self.creds_file:
+            self.logger.error("GOOGLE_CREDENTIALS_FILE is not set in the environment variables")
             raise ValueError("GOOGLE_CREDENTIALS_FILE is not set in the environment variables")
 
         # Initialize TwitchAPI
         client_id = os.getenv("TWITCH_CLIENT_ID")
         client_secret = os.getenv("TWITCH_CLIENT_SECRET")
         redirect_uri = os.getenv("TWITCH_REDIRECT_URI")
+        if not client_id:
+            self.logger.error("TWITCH_CLIENT_ID is not set in the environment variables")
+        if not client_secret:
+            self.logger.error("TWITCH_CLIENT_SECRET is not set in the environment variables")
+        if not redirect_uri:
+            self.logger.error("TWITCH_REDIRECT_URI is not set in the environment variables")
         if not client_id or not client_secret or not redirect_uri:
             raise ValueError(
                 "TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, and TWITCH_REDIRECT_URI must be set in environment variables"
