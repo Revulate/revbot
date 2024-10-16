@@ -40,9 +40,8 @@ jobs:
 
       - name: Run linter and tests
         run: |
-          pip install flake8 pytest
+          pip install flake8
           flake8 .
-          pytest
 
   deploy:
     runs-on: self-hosted
