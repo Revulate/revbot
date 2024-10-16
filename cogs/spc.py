@@ -17,7 +17,7 @@ class Spc(commands.Cog):
         self.steam_api_key = os.getenv("API_STEAM_KEY")
         self.db_path = "steam_game.db"
         self.session = None
-        self.bot.loop.create_task(self.initialize())
+        self.fetch_task = None
         self.game_cache = OrderedDict()
         self.player_count_cache = OrderedDict()
         self.reviews_cache = OrderedDict()
@@ -29,50 +29,46 @@ class Spc(commands.Cog):
 
     async def initialize(self):
         await self._setup_database()
-        self.session = aiohttp.ClientSession()
-        self.fetch_task = self.bot.loop.create_task(self.fetch_games_data_periodically())
+        self.session = self.bot.session if hasattr(self.bot, "session") else aiohttp.ClientSession()
+        self.fetch_task = asyncio.create_task(self.fetch_games_data_periodically())
+        self.logger.info("Spc cog initialized.")
 
     async def cog_unload(self):
         if self.fetch_task:
             self.fetch_task.cancel()
-        if self.session:
+            try:
+                await self.fetch_task
+            except asyncio.CancelledError:
+                pass
+        if self.session and self.session is not self.bot.session:
             await self.session.close()
         self.logger.info("Spc cog unloaded and tasks canceled.")
 
     async def _setup_database(self):
         async with aiosqlite.connect(self.db_path) as db:
-            # Create the table if it doesn't exist
             await db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS Steam_Game (
                     ID INTEGER PRIMARY KEY,
-                    Name TEXT NOT NULL
+                    Name TEXT NOT NULL,
+                    LastUpdated INTEGER
                 )
             """
             )
-
-            # Check if LastUpdated column exists, if not, add it
-            cursor = await db.execute("PRAGMA table_info(Steam_Game)")
-            columns = await cursor.fetchall()
-            column_names = [column[1] for column in columns]
-
-            if "LastUpdated" not in column_names:
-                await db.execute("ALTER TABLE Steam_Game ADD COLUMN LastUpdated INTEGER")
-
-            # Create index if it doesn't exist
             await db.execute("CREATE INDEX IF NOT EXISTS idx_name ON Steam_Game(Name)")
             await db.commit()
-        self.logger.info("Steam_Game table, LastUpdated column, and index set up.")
+        self.logger.info("Steam_Game table and index set up.")
 
     async def fetch_games_data_periodically(self):
         while True:
             try:
                 await self.fetch_games_data()
+                await asyncio.sleep(86400)  # Update daily
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"Error fetching Steam games data: {e}", exc_info=True)
-            await asyncio.sleep(86400)  # Update daily
+                await asyncio.sleep(3600)  # Wait an hour before retrying on error
 
     async def fetch_games_data(self):
         self.logger.info("Fetching Steam games data...")
@@ -94,23 +90,13 @@ class Spc(commands.Cog):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN TRANSACTION")
             try:
-                # Check if LastUpdated column exists
-                cursor = await db.execute("PRAGMA table_info(Steam_Game)")
-                columns = await cursor.fetchall()
-                has_last_updated = any(column[1] == "LastUpdated" for column in columns)
-
                 for game in apps:
                     app_id, name = game.get("appid"), game.get("name")
                     if app_id and name:
-                        if has_last_updated:
-                            await db.execute(
-                                "INSERT OR REPLACE INTO Steam_Game (ID, Name, LastUpdated) VALUES (?, ?, ?)",
-                                (app_id, name, current_time),
-                            )
-                        else:
-                            await db.execute(
-                                "INSERT OR REPLACE INTO Steam_Game (ID, Name) VALUES (?, ?)", (app_id, name)
-                            )
+                        await db.execute(
+                            "INSERT OR REPLACE INTO Steam_Game (ID, Name, LastUpdated) VALUES (?, ?, ?)",
+                            (app_id, name, current_time),
+                        )
                 await db.commit()
                 self.logger.info("Steam games data updated successfully.")
             except Exception as e:
@@ -121,7 +107,7 @@ class Spc(commands.Cog):
     async def steam_game_players(self, ctx: commands.Context, *args):
         self.logger.info(f"Processing #spc command from {ctx.author.name}")
 
-        if not self.steam_api_key and not args:
+        if not self.steam_api_key:
             await ctx.send(f"@{ctx.author.name}, Steam API key is not configured.")
             return
 

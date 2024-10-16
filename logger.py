@@ -6,6 +6,11 @@ import codecs
 
 def setup_logger(name, log_file="bot.log", level=logging.INFO):
     logger = logging.getLogger(name)
+
+    # Clear any existing handlers to prevent duplicate logging
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
     logger.setLevel(level)
 
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -19,6 +24,9 @@ def setup_logger(name, log_file="bot.log", level=logging.INFO):
     file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
+
+    # Prevent propagation to avoid duplicate logs
+    logger.propagate = False
 
     return logger
 

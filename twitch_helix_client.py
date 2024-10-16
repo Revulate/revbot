@@ -114,6 +114,7 @@ class TwitchAPI:
 
     async def api_request(self, endpoint, params=None, method="GET", data=None):
         await self.ensure_session()
+        await self.ensure_token_valid()
 
         url = f"{self.BASE_URL}/{endpoint}"
         headers = {
@@ -138,11 +139,7 @@ class TwitchAPI:
                         return await perform_request(session)
                 raise
 
-        if self.session:
-            return await perform_request(self.session)
-        else:
-            async with aiohttp.ClientSession() as session:
-                return await perform_request(session)
+        return await perform_request(self.session)
 
     async def get_streams(self, user_logins):
         params = {"user_login": user_logins}

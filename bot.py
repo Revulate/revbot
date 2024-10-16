@@ -45,12 +45,15 @@ class TwitchBot(commands.Bot):
         # Check for missing critical environment variables
         self._check_env_variables()
 
+        # Set initial_channels as an instance variable
+        self.initial_channels = [channel.strip() for channel in channels if channel.strip()]
+
         super().__init__(
             token=self.token,
             client_id=self.client_id,
             nick=nick,
             prefix=prefix,
-            initial_channels=[channel.strip() for channel in channels if channel.strip()],
+            initial_channels=self.initial_channels,
         )
         self.broadcaster_user_id = os.getenv("BROADCASTER_USER_ID")
         self.bot_user_id = None
@@ -74,6 +77,7 @@ class TwitchBot(commands.Bot):
         await self.ensure_valid_token()
         await self.fetch_user_id()
         await self.fetch_example_streams()
+        await self.join_channels()
         self.load_modules()
 
         # Start periodic token checking
@@ -129,6 +133,14 @@ class TwitchBot(commands.Bot):
             self.logger.error(f"Error during close: {e}")
         finally:
             await super().close()
+
+    async def _close_cogs(self):
+        for name, cog in self.cogs.items():
+            if hasattr(cog, "cog_unload") and asyncio.iscoroutinefunction(cog.cog_unload):
+                try:
+                    await cog.cog_unload()
+                except Exception as e:
+                    self.logger.error(f"Error unloading cog {name}: {e}")
 
     async def ensure_valid_token(self):
         if not self.twitch_api.token_expiry or self.twitch_api.token_expiry <= datetime.datetime.now():
@@ -216,6 +228,15 @@ class TwitchBot(commands.Bot):
             except Exception as e:
                 self.logger.error(f"Failed to load extension {cog}: {e}")
 
+    async def join_channels(self):
+        for channel in self.initial_channels:
+            try:
+                self.logger.info(f"Attempting to join channel: {channel}")
+                await self._connection.join_channels([channel])
+                self.logger.info(f"Successfully joined channel: {channel}")
+            except Exception as e:
+                self.logger.error(f"Failed to join channel {channel}: {e}")
+
     @commands.command(name="listcommands")
     async def list_commands(self, ctx: commands.Context):
         command_list = [cmd.name for cmd in self.commands.values()]
@@ -231,7 +252,7 @@ class TwitchBot(commands.Bot):
             self.logger.error(f"Error data: {data}")
 
     async def check_token_regularly(self):
-        while True:
+        while not self._closing.is_set():
             await asyncio.sleep(3600)  # Check every hour
             await self.ensure_valid_token()
 
@@ -240,6 +261,8 @@ async def main():
     bot = TwitchBot()
     try:
         await bot.start()
+    except KeyboardInterrupt:
+        bot.logger.info("Received keyboard interrupt. Shutting down...")
     except Exception as e:
         bot.logger.error(f"An unexpected error occurred: {e}")
         bot.logger.error(f"Error traceback: {e.__traceback__}")
