@@ -40,16 +40,11 @@ class TwitchBot(commands.Bot):
         self.refresh_token = os.getenv("REFRESH_TOKEN")
         nick = os.getenv("BOT_NICK")
         prefix = os.getenv("COMMAND_PREFIX", "#")
-        channels = os.getenv("TWITCH_CHANNELS", "").split(",")
-        self.initial_channels = [
-            channel.strip() for channel in channels if isinstance(channel, str) and channel.strip()
-        ]
+        channels = os.getenv("TWITCH_CHANNELS", "").strip().split(",")
+        self.initial_channels = [channel.strip() for channel in channels if channel.strip()]
 
         # Check for missing critical environment variables
         self._check_env_variables()
-
-        # Set initial_channels as an instance variable
-        self.initial_channels = channels
 
         super().__init__(
             token=self.token,
@@ -233,18 +228,12 @@ class TwitchBot(commands.Bot):
 
     async def join_channels(self):
         for channel in self.initial_channels:
-            if isinstance(entry, str):
-                channel = re.sub("[#]", "", entry).lower()
-            else:
-                # Handle the unexpected type case
-                self.logger.error(f"Unexpected type for entry: {type(entry)}, value: {entry}")
-
-                try:
-                    self.logger.info(f"Attempting to join channel: {channel}")
-                    await self._connection.join_channels([channel])
-                    self.logger.info(f"Successfully joined channel: {channel}")
-                except Exception as e:
-                    self.logger.error(f"Failed to join channel {channel}: {e}")
+            try:
+                self.logger.info(f"Attempting to join channel: {channel}")
+                await self._connection.join_channels([channel])
+                self.logger.info(f"Successfully joined channel: {channel}")
+            except Exception as e:
+                self.logger.error(f"Failed to join channel {channel}: {e}")
 
     @commands.command(name="listcommands")
     async def list_commands(self, ctx: commands.Context):
