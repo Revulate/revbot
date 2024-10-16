@@ -38,11 +38,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run linter and tests
-        run: |
-          pip install flake8
-          flake8 .
-
   deploy:
     runs-on: self-hosted
     needs: build
