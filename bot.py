@@ -46,7 +46,7 @@ class TwitchBot(commands.Bot):
         self._check_env_variables()
 
         # Set initial_channels as an instance variable
-        self.initial_channels = [channel.strip() for channel in channels if channel.strip()]
+        self.initial_channels = [channel.strip() for channel in channels if isinstance(channel.strip(), str)]
 
         super().__init__(
             token=self.token,
