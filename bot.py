@@ -75,7 +75,6 @@ class TwitchBot(commands.Bot):
         await self.ensure_valid_token()
         await self.fetch_user_id()
         await self.fetch_example_streams()
-        await self.join_channels()
         self.load_modules()
 
         # Start periodic token checking
@@ -227,13 +226,12 @@ class TwitchBot(commands.Bot):
                 self.logger.error(f"Failed to load extension {cog}: {e}")
 
     async def join_channels(self):
-        for channel in self.initial_channels:
-            try:
-                self.logger.info(f"Attempting to join channel: {channel}")
-                await self._connection.join_channels([channel])
-                self.logger.info(f"Successfully joined channel: {channel}")
-            except Exception as e:
-                self.logger.error(f"Failed to join channel {channel}: {e}")
+        try:
+            self.logger.info(f"Attempting to join channels: {self.initial_channels}")
+            await self._connection.join_channels(self.initial_channels)
+            self.logger.info(f"Successfully joined channels: {self.initial_channels}")
+        except Exception as e:
+            self.logger.error(f"Failed to join channels: {e}")
 
     @commands.command(name="listcommands")
     async def list_commands(self, ctx: commands.Context):

@@ -77,32 +77,6 @@ jobs:
             cp requirements.txt venv/.requirements_installed
           fi
 
-          # Create .env file (using existing secrets)
-          cat <<EOF > .env
-          TWITCH_CLIENT_ID=${{ secrets.TWITCH_CLIENT_ID }}
-          TWITCH_CLIENT_SECRET=${{ secrets.TWITCH_CLIENT_SECRET }}
-          ACCESS_TOKEN=${{ secrets.ACCESS_TOKEN }}
-          REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
-          BOT_NICK=${{ secrets.BOT_NICK }}
-          TWITCH_CHANNELS=${{ secrets.TWITCH_CHANNELS }}
-          COMMAND_PREFIX=${{ secrets.COMMAND_PREFIX }}
-          ADMIN_USERS=${{ secrets.ADMIN_USERS }}
-          BOT_USER_ID=${{ secrets.BOT_USER_ID }}
-          BROADCASTER_USER_ID=${{ secrets.BROADCASTER_USER_ID }}
-          LOG_LEVEL=${{ secrets.LOG_LEVEL }}
-          LOG_FILE=${{ secrets.LOG_FILE }}
-          LOG_MAX_BYTES=${{ secrets.LOG_MAX_BYTES }}
-          LOG_BACKUP_COUNT=${{ secrets.LOG_BACKUP_COUNT }}
-          API_STEAM_KEY=${{ secrets.API_STEAM_KEY }}
-          LOGDNA_INGESTION_KEY=${{ secrets.LOGDNA_INGESTION_KEY }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          WEATHER_API_KEY=${{ secrets.WEATHER_API_KEY }}
-          NUULS_API_KEY=${{ secrets.NUULS_API_KEY }}
-          GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_CREDENTIALS_FILE=credentials.json
-          TOKEN_EXPIRY=${{ secrets.TOKEN_EXPIRY }}
-          EOF
-
           # Ensure correct file permissions for credentials.json
           echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
           chmod 600 credentials.json
