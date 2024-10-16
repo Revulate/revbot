@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import aiosqlite
 from twitchio.ext import commands
 from utils import parse_time, format_time_delta, normalize_username, fetch_user, get_channel
@@ -141,8 +141,8 @@ class Remind(commands.Cog):
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
 
-        remind_time, message = parse_time(message.split())
-        remind_time = created_at + remind_time if remind_time else None
+        remind_time_delta, message = parse_time(message.split())
+        remind_time = created_at + remind_time_delta if remind_time_delta else None
 
         reminder = Reminder(
             reminder_id=reminder_id,

@@ -63,18 +63,18 @@ class TwitchAPI:
             "grant_type": "authorization_code",
             "redirect_uri": self.redirect_uri,
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(self.TOKEN_URL, data=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self.oauth_token = data["access_token"]
-                    self.refresh_token = data["refresh_token"]
-                    self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
-                    self.save_tokens()
-                    return True
-                else:
-                    log_error(f"Failed to exchange code for token: {await response.text()}")
-                    return False
+        await self.ensure_session()
+        async with self.session.post(self.TOKEN_URL, data=params) as response:
+            if response.status == 200:
+                data = await response.json()
+                self.oauth_token = data["access_token"]
+                self.refresh_token = data["refresh_token"]
+                self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
+                self.save_tokens()
+                return True
+            else:
+                log_error(f"Failed to exchange code for token: {await response.text()}")
+                return False
 
     async def refresh_oauth_token(self):
         if not self.refresh_token:
@@ -87,20 +87,20 @@ class TwitchAPI:
             "grant_type": "refresh_token",
             "refresh_token": self.refresh_token,
         }
+        await self.ensure_session()
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.TOKEN_URL, data=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        self.oauth_token = data["access_token"]
-                        self.refresh_token = data.get("refresh_token", self.refresh_token)
-                        self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
-                        self.save_tokens()
-                        log_info("OAuth token refreshed successfully")
-                        return True
-                    else:
-                        log_error(f"Failed to refresh token: {await response.text()}")
-                        return False
+            async with self.session.post(self.TOKEN_URL, data=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    self.oauth_token = data["access_token"]
+                    self.refresh_token = data.get("refresh_token", self.refresh_token)
+                    self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
+                    self.save_tokens()
+                    log_info("OAuth token refreshed successfully")
+                    return True
+                else:
+                    log_error(f"Failed to refresh token: {await response.text()}")
+                    return False
         except Exception as e:
             log_error(f"Error during token refresh: {e}", exc_info=True)
             return False
@@ -122,24 +122,22 @@ class TwitchAPI:
             "Client-ID": self.client_id,
         }
 
-        async def perform_request(session):
-            try:
-                if method == "GET":
-                    async with session.get(url, params=params, headers=headers) as response:
-                        response.raise_for_status()
-                        return await response.json()
-                elif method == "POST":
-                    async with session.post(url, params=params, headers=headers, json=data) as response:
-                        response.raise_for_status()
-                        return await response.json()
-            except aiohttp.ClientResponseError as e:
-                if e.status == 401:
-                    if await self.refresh_oauth_token():
-                        headers["Authorization"] = f"Bearer {self.oauth_token}"
-                        return await perform_request(session)
-                raise
-
-        return await perform_request(self.session)
+        try:
+            if method == "GET":
+                async with self.session.get(url, params=params, headers=headers) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            elif method == "POST":
+                async with self.session.post(url, params=params, headers=headers, json=data) as response:
+                    response.raise_for_status()
+                    return await response.json()
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401:
+                if await self.refresh_oauth_token():
+                    headers["Authorization"] = f"Bearer {self.oauth_token}"
+                    return await self.api_request(endpoint, params, method, data)
+            log_error(f"Request failed: {e}")
+            raise
 
     async def get_streams(self, user_logins):
         params = {"user_login": user_logins}
@@ -164,22 +162,23 @@ class TwitchAPI:
             return None
 
     async def get_game_image_url(self, game_name):
+        await self.ensure_session()
+        headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.oauth_token}"}
+        params = {"name": game_name}
+        url = f"{self.BASE_URL}/games"
+
         try:
-            url = f"{self.BASE_URL}/games"
-            headers = {"Client-ID": self.client_id, "Authorization": f"Bearer {self.oauth_token}"}
-            params = {"name": game_name}
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data["data"]:
-                            box_art_url = data["data"][0]["box_art_url"]
-                            formatted_url = box_art_url.replace("{width}", "285").replace("{height}", "380")
-                            if validators.url(formatted_url):
-                                log_info(f"Generated image URL for '{game_name}': {formatted_url}")
-                                return formatted_url
-                            else:
-                                log_warning(f"Invalid image URL generated for '{game_name}': {formatted_url}")
+            async with self.session.get(url, headers=headers, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data["data"]:
+                        box_art_url = data["data"][0]["box_art_url"]
+                        formatted_url = box_art_url.replace("{width}", "285").replace("{height}", "380")
+                        if validators.url(formatted_url):
+                            log_info(f"Generated image URL for '{game_name}': {formatted_url}")
+                            return formatted_url
+                        else:
+                            log_warning(f"Invalid image URL generated for '{game_name}': {formatted_url}")
             log_warning(f"No image found for game: {game_name}")
         except Exception as e:
             log_error(f"Error fetching image URL for {game_name}: {e}", exc_info=True)
