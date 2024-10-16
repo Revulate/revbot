@@ -41,13 +41,15 @@ class TwitchBot(commands.Bot):
         nick = os.getenv("BOT_NICK")
         prefix = os.getenv("COMMAND_PREFIX", "#")
         channels = os.getenv("TWITCH_CHANNELS", "").split(",")
-        channels = [channel.strip() for channel in channels]  # To remove leading/trailing whitespace
+        channels = [
+            channel.strip() for channel in channels if channel.strip()
+        ]  # To remove leading/trailing whitespace and filter empty strings
 
         # Check for missing critical environment variables
         self._check_env_variables()
 
         # Set initial_channels as an instance variable
-        self.initial_channels = [channel for channel in channels if isinstance(channel, str)]
+        self.initial_channels = channels
 
         super().__init__(
             token=self.token,
