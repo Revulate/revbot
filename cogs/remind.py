@@ -122,7 +122,10 @@ class Remind(commands.Cog):
             created_at = created_at.replace(tzinfo=timezone.utc)
 
         remind_time_delta, message = parse_time(message.split())
-        remind_time = created_at + remind_time_delta if remind_time_delta else None
+        if remind_time_delta and isinstance(remind_time_delta, timedelta):
+            remind_time = created_at + remind_time_delta
+        else:
+            remind_time = None
 
         reminder = Reminder(
             reminder_id=reminder_id,
