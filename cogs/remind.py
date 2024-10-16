@@ -59,9 +59,13 @@ class Remind(commands.Cog):
                     active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL
                 )
-            """
+                """
             )
             await db.commit()
+
+    async def close_database(self):
+        # Placeholder for closing any persistent connections if needed.
+        pass
 
     @commands.Cog.event()
     async def event_ready(self):
@@ -162,7 +166,7 @@ class Remind(commands.Cog):
                 INSERT INTO reminders (id, user_id, username, target_id, target_name, channel_id, channel_name,
                 message, remind_time, private, trigger_on_message, active, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+                """,
                 (
                     reminder.id,
                     reminder.user.id,

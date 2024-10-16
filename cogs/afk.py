@@ -10,6 +10,9 @@ class Afk(commands.Cog):
         self.db_path = "bot.db"
         self.last_afk_message_time = {}
 
+    async def event_ready(self):
+        await self.setup_database()
+
     async def setup_database(self):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -22,9 +25,13 @@ class Afk(commands.Cog):
                     return_time REAL,
                     active INTEGER NOT NULL DEFAULT 1
                 )
-            """
+                """
             )
             await db.commit()
+
+    async def close_database(self):
+        # Placeholder for closing any persistent connections if needed.
+        pass
 
     @commands.command(name="afk", aliases=["sleep", "gn", "work", "food", "gaming", "bed"])
     async def afk_command(self, ctx: commands.Context, *, reason: str = None):
@@ -48,7 +55,7 @@ class Afk(commands.Cog):
                 """
                 INSERT OR REPLACE INTO afk (user_id, username, afk_time, reason, return_time, active)
                 VALUES (?, ?, ?, ?, NULL, 1)
-            """,
+                """,
                 (user_id, username, afk_time, full_reason),
             )
             await conn.commit()
@@ -76,7 +83,7 @@ class Afk(commands.Cog):
                             UPDATE afk
                             SET active = 1, return_time = NULL
                             WHERE user_id = ?
-                        """,
+                            """,
                             (user_id,),
                         )
                         await conn.commit()
@@ -120,7 +127,7 @@ class Afk(commands.Cog):
                         UPDATE afk
                         SET active = 0, return_time = ?
                         WHERE user_id = ?
-                    """,
+                        """,
                         (time.time(), user_id),
                     )
                     await conn.commit()
