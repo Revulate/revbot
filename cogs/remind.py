@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import aiosqlite
 from twitchio.ext import commands
-from utils import parse_time, format_time_delta, normalize_username, fetch_user, get_channel
+from utils import parse_time, format_time_delta, normalize_username, fetch_user, get_channel, setup_database
 
 
 class Reminder:
@@ -41,27 +41,7 @@ class Remind(commands.Cog):
         self.check_timed_reminders_task = None
 
     async def setup_database(self):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS reminders (
-                    id TEXT PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    username TEXT NOT NULL,
-                    target_id INTEGER NOT NULL,
-                    target_name TEXT NOT NULL,
-                    channel_id INTEGER NOT NULL,
-                    channel_name TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    remind_time TEXT,
-                    private INTEGER NOT NULL,
-                    trigger_on_message INTEGER NOT NULL,
-                    active INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
-            await db.commit()
+        await setup_database(self.db_path)
 
     async def close_database(self):
         # Placeholder for closing any persistent connections if needed.

@@ -133,6 +133,9 @@ jobs:
           }
           EOF
 
+          # Set up the database to ensure all tables exist
+          python -c 'from utils import setup_database; setup_database()'
+
           # Run database migrations if any
           if [ -f "migrate.py" ]; then
             python migrate.py
