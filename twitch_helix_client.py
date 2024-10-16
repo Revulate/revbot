@@ -40,9 +40,14 @@ class TwitchAPI:
         self.token_expiry = datetime.datetime.fromisoformat(expiry) if expiry else None
 
     def save_tokens(self):
-        set_key(".env", "ACCESS_TOKEN", self.oauth_token)
-        set_key(".env", "REFRESH_TOKEN", self.refresh_token)
-        set_key(".env", "TOKEN_EXPIRY", self.token_expiry.isoformat() if self.token_expiry else "")
+        # Ensure there are no trailing newlines or extra quotes
+        access_token = self.oauth_token.strip()
+        refresh_token = self.refresh_token.strip()
+        expiry = self.token_expiry.isoformat() if self.token_expiry else ""
+
+        set_key(".env", "ACCESS_TOKEN", access_token)
+        set_key(".env", "REFRESH_TOKEN", refresh_token)
+        set_key(".env", "TOKEN_EXPIRY", expiry)
 
     async def get_authorization_url(self, scopes):
         state = os.urandom(16).hex()
@@ -87,20 +92,21 @@ class TwitchAPI:
             "grant_type": "refresh_token",
             "refresh_token": self.refresh_token,
         }
-        await self.ensure_session()
         try:
-            async with self.session.post(self.TOKEN_URL, data=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self.oauth_token = data["access_token"]
-                    self.refresh_token = data.get("refresh_token", self.refresh_token)
-                    self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
-                    self.save_tokens()
-                    log_info("OAuth token refreshed successfully")
-                    return True
-                else:
-                    log_error(f"Failed to refresh token: {await response.text()}")
-                    return False
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.TOKEN_URL, data=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        self.oauth_token = data["access_token"]
+                        self.refresh_token = data.get("refresh_token", self.refresh_token)
+                        self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
+                        self.save_tokens()
+                        load_dotenv(override=True)  # Force reloading updated tokens
+                        log_info("OAuth token refreshed successfully")
+                        return True
+                    else:
+                        log_error(f"Failed to refresh token: {await response.text()}")
+                        return False
         except Exception as e:
             log_error(f"Error during token refresh: {e}", exc_info=True)
             return False

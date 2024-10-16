@@ -27,14 +27,10 @@ jobs:
 
       - name: Set up Python Virtual Environment and Install Dependencies
         run: |
-          if [ ! -d "venv" ] && [ ! -d "env" ]; then
+          if [ ! -d "venv" ]; then
             python3.11 -m venv venv
           fi
-          if [ -d "venv" ]; then
-            source venv/bin/activate
-          elif [ -d "env" ]; then
-            source env/bin/activate
-          fi
+          source venv/bin/activate
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -69,15 +65,10 @@ jobs:
             git clone --branch main $REPO_URL .
           fi
 
-          if [ ! -d "venv" ] && [ ! -d "env" ]; then
+          if [ ! -d "venv" ]; then
             python3.11 -m venv venv
           fi
-          if [ -d "venv" ]; then
-            source venv/bin/activate
-          elif [ -d "env" ]; then
-            source env/bin/activate
-          fi
-
+          source venv/bin/activate
           pip install -r requirements.txt
 
           # Create .env file (using existing secrets)
@@ -103,11 +94,14 @@ jobs:
           NUULS_API_KEY=${{ secrets.NUULS_API_KEY }}
           GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_CREDENTIALS_FILE=credentials.json
+          TOKEN_EXPIRY=${{ secrets.TOKEN_EXPIRY }}
           EOF
 
+          # Ensure correct file permissions for credentials.json
           echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
           chmod 600 credentials.json
 
+          # Install Node.js and PM2 if not present
           if ! command -v node &> /dev/null; then
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
             sudo apt-get install -y nodejs
@@ -117,6 +111,7 @@ jobs:
             sudo npm install -g pm2
           fi
 
+          # Create or update PM2 ecosystem config
           cat <<EOF > ecosystem.config.js
           module.exports = {
             apps: [{
@@ -143,7 +138,8 @@ jobs:
             python migrate.py
           fi
 
-          pm2 start ecosystem.config.js --update-env
+          # Start or restart the bot using PM2
+          pm2 start ecosystem.config.js --update-env || pm2 restart ecosystem.config.js --update-env
           pm2 save
           sudo pm2 startup systemd -u $USER --hp $HOME
 
