@@ -43,6 +43,28 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
+      - name: Check current user
+        run: |
+          echo "Current user: $(whoami)"
+          echo "User ID: $(id -u)"
+          echo "Groups: $(groups)"
+
+      - name: Set up environment
+        run: |
+          echo "Setting up environment..."
+          export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+          echo $PATH
+          # Add any other necessary environment variables here
+
+      - name: Debug output
+        run: |
+          echo "Debug: Checking sudo configuration"
+          sudo -n -l
+          echo "Debug: PM2 version"
+          pm2 -v || echo "PM2 not found"
+          echo "Debug: Node.js version"
+          node -v || echo "Node.js not found"
+
       - name: Deploy to Raspberry Pi
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
@@ -82,13 +104,13 @@ jobs:
           chmod 600 credentials.json
 
           # Install Node.js and PM2 if not present
-          if ! command -v node &> /dev/null; then
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-            sudo apt-get install -y nodejs
+          if ! sudo -n command -v node &> /dev/null; then
+            sudo -n curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -n bash -
+            sudo -n apt-get install -y nodejs
           fi
 
-          if ! command -v pm2 &> /dev/null; then
-            sudo npm install -g pm2
+          if ! sudo -n command -v pm2 &> /dev/null; then
+            sudo -n npm install -g pm2
           fi
 
           # Create or update PM2 ecosystem config
@@ -122,20 +144,20 @@ jobs:
           fi
 
           # Start or restart the bot using PM2
-          pm2 start ecosystem.config.js --update-env || pm2 delete twitch-bot && pm2 start ecosystem.config.js --update-env
-          pm2 save
-          sudo pm2 startup systemd -u $USER --hp $HOME
+          sudo -u $USER pm2 start ecosystem.config.js --update-env || sudo -u $USER pm2 delete twitch-bot && sudo -u $USER pm2 start ecosystem.config.js --update-env
+          sudo -u $USER pm2 save
+          sudo -n pm2 startup systemd -u $USER --hp $HOME
 
           # Health check
           sleep 10
-          if ! pm2 list | grep -q "online"; then
+          if ! sudo -u $USER pm2 list | grep -q "online"; then
             echo "Error: twitch-bot is not running after restart"
             # Rollback
             echo "Rolling back to previous version..."
             rm -rf $REVUBOT_DIR
             mv $BACKUP_DIR $REVUBOT_DIR
             cd $REVUBOT_DIR
-            pm2 start ecosystem.config.js --update-env
+            sudo -u $USER pm2 start ecosystem.config.js --update-env
             exit 1
           fi
 
