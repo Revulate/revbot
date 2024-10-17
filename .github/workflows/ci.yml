@@ -140,10 +140,8 @@ jobs:
           BROADCASTER_USER_ID=$BROADCASTER_USER_ID
           EOF
 
-          echo "Checking Node.js and PM2..."
-          node -v || echo "Node.js not found. Please install it manually."
-          npm install pm2
-          export PATH="$PATH:$HOME/revbot/node_modules/.bin"
+          echo "Setting up database..."
+          python -c 'from utils import setup_database; setup_database()'
 
           echo "Creating PM2 ecosystem config..."
           cat <<EOF > ecosystem.config.js
@@ -151,39 +149,51 @@ jobs:
             apps: [{
               name: "twitch-bot",
               script: "bot.py",
-              interpreter: "$(which python)",
+              interpreter: "/home/actionsrunner/revbot/venv/bin/python",
+              interpreter_args: "-u",
               watch: false,
-              ignore_watch: ["node_modules", "logs"],
+              ignore_watch: [
+                "node_modules",
+                "logs",
+                "*.log",
+                "*.db",
+                "*.db-journal",
+                ".git"
+              ],
+              exec_mode: "fork",
               max_memory_restart: "1G",
               env: {
                 NODE_ENV: "production",
-                PYTHONUNBUFFERED: "1"
-              }
+                PYTHONUNBUFFERED: "1",
+                PYTHONPATH: "/home/actionsrunner/revbot/venv/lib/python3.11/site-packages"
+              },
+              env_file: "/home/actionsrunner/revbot/.env",
+              error_file: "/home/actionsrunner/revbot/logs/err.log",
+              out_file: "/home/actionsrunner/revbot/logs/out.log",
+              log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+              restart_delay: 5000,
+              autorestart: true,
+              instance_var: 'INSTANCE_ID',
+              merge_logs: true,
+              kill_timeout: 5000,
+              shutdown_with_message: true,
+              wait_ready: true,
+              max_restarts: 10,
+              min_uptime: "1m",
+              listen_timeout: 8000,
             }]
           }
           EOF
 
-          echo "Setting up database..."
-          python -c 'from utils import setup_database; setup_database()'
-
-          if [ -f "migrate.py" ]; then
-            echo "Running database migrations..."
-            python migrate.py
-          fi
-
           echo "Starting/restarting bot with PM2..."
-          pm2 describe twitch-bot > /dev/null
-          if [ $? -eq 0 ]; then
-            pm2 restart twitch-bot
-          else
-            pm2 start ecosystem.config.js
-          fi
+          pm2 delete twitch-bot || true
+          pm2 start ecosystem.config.js
 
           echo "Saving PM2 process list..."
           pm2 save
 
           echo "Performing health check..."
-          sleep 10
+          sleep 30
           if ! pm2 list | grep -q "online"; then
             echo "Error: twitch-bot is not running after restart"
             echo "PM2 status:"
