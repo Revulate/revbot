@@ -4,7 +4,7 @@ module.exports = {
     script: "bot.py",
     interpreter: process.platform === "win32" ? "python" : "/home/actionsrunner/revbot/venv/bin/python",
     interpreter_args: "-u",  // Use unbuffered mode
-    watch: true,
+    watch: false,  // Disabled watch mode to prevent frequent restarts
     ignore_watch: [
       "node_modules",
       "logs",
