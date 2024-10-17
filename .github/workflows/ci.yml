@@ -31,11 +31,8 @@ jobs:
             python3.11 -m venv venv
           fi
           source venv/bin/activate
-          if [ ! -f "venv/.requirements_installed" ] || ! cmp -s requirements.txt venv/.requirements_installed; then
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
-            cp requirements.txt venv/.requirements_installed
-          fi
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
   deploy:
     runs-on: self-hosted
@@ -43,36 +40,29 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
-      - name: Check current user
+      - name: Check current user and environment
         run: |
           echo "Current user: $(whoami)"
           echo "User ID: $(id -u)"
           echo "Groups: $(groups)"
+          echo "Home directory: $HOME"
+          echo "Current directory: $(pwd)"
+          echo "PATH: $PATH"
 
-      - name: Set up environment
+      - name: Check system dependencies
         run: |
-          echo "Setting up environment..."
-          export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
-          echo $PATH
-          # Add any other necessary environment variables here
-
-      - name: Debug output
-        run: |
-          echo "Debug: Checking sudo configuration"
-          sudo -n -l
-          echo "Debug: PM2 version"
-          pm2 -v || echo "PM2 not found"
-          echo "Debug: Node.js version"
-          node -v || echo "Node.js not found"
+          python3.11 --version
+          pip --version
+          node --version
+          npm --version
+          pm2 --version || echo "PM2 not found"
 
       - name: Deploy to Raspberry Pi
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           set -e
-          echo "Current user: $(whoami)"
-          echo "Home directory: $HOME"
-          echo "Current directory: $(pwd)"
+          echo "Starting deployment process..."
           
           REVUBOT_DIR=$HOME/revbot
           REPO_URL=https://github.com/Revulate/revbot.git
@@ -80,40 +70,43 @@ jobs:
 
           # Backup current version
           if [ -d "$REVUBOT_DIR" ]; then
+            echo "Backing up current version..."
             cp -r $REVUBOT_DIR $BACKUP_DIR
+          else
+            echo "No existing directory to backup."
           fi
 
+          echo "Creating/updating $REVUBOT_DIR..."
           mkdir -p $REVUBOT_DIR
           cd $REVUBOT_DIR
 
           if [ -d ".git" ]; then
+            echo "Updating existing repository..."
             git fetch origin
             git checkout main
             git reset --hard origin/main
           else
+            echo "Cloning repository..."
             git clone --branch main $REPO_URL .
           fi
 
+          echo "Setting up Python environment..."
           if [ ! -d "venv" ]; then
             python3.11 -m venv venv
           fi
           source venv/bin/activate
           pip install -r requirements.txt
 
-          # Ensure correct file permissions for credentials.json
+          echo "Setting up credentials..."
           echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
           chmod 600 credentials.json
 
-          # Install Node.js if not present (assuming it's already installed)
+          echo "Checking Node.js and PM2..."
           node -v || echo "Node.js not found. Please install it manually."
+          npm install pm2
+          export PATH="$PATH:$HOME/revbot/node_modules/.bin"
 
-          # Install PM2 locally if not present
-          if ! command -v pm2 &> /dev/null; then
-            npm install pm2
-            export PATH="$PATH:$HOME/revbot/node_modules/.bin"
-          fi
-
-          # Create or update PM2 ecosystem config
+          echo "Creating PM2 ecosystem config..."
           cat <<EOF > ecosystem.config.js
           module.exports = {
             apps: [{
@@ -135,29 +128,56 @@ jobs:
           }
           EOF
 
-          # Set up the database to ensure all tables exist
+          echo "Setting up database..."
           python -c 'from utils import setup_database; setup_database()'
 
-          # Run database migrations if any
           if [ -f "migrate.py" ]; then
+            echo "Running database migrations..."
             python migrate.py
           fi
 
-          # Start or restart the bot using PM2
-          pm2 start ecosystem.config.js --update-env || pm2 delete twitch-bot && pm2 start ecosystem.config.js --update-env
+          echo "Starting/restarting bot with PM2..."
+          pm2 describe twitch-bot > /dev/null
+          if [ $? -eq 0 ]; then
+            pm2 restart twitch-bot
+          else
+            pm2 start ecosystem.config.js
+          fi
+
+          echo "Saving PM2 process list..."
           pm2 save
 
-          # Health check
+          echo "Performing health check..."
           sleep 10
           if ! pm2 list | grep -q "online"; then
             echo "Error: twitch-bot is not running after restart"
-            # Rollback
+            echo "PM2 status:"
+            pm2 list
+            echo "PM2 logs:"
+            pm2 logs --lines 50
             echo "Rolling back to previous version..."
-            rm -rf $REVUBOT_DIR
-            mv $BACKUP_DIR $REVUBOT_DIR
-            cd $REVUBOT_DIR
-            pm2 start ecosystem.config.js --update-env
+            if [ -d "$BACKUP_DIR" ]; then
+              rm -rf $REVUBOT_DIR
+              mv $BACKUP_DIR $REVUBOT_DIR
+              cd $REVUBOT_DIR
+              pm2 start ecosystem.config.js
+              echo "Rollback completed."
+            else
+              echo "No backup directory found. Cannot rollback."
+            fi
             exit 1
           fi
 
           echo "Deployment completed successfully"
+
+      - name: Cleanup old backups
+        run: |
+          find $HOME/revbot_backup_* -maxdepth 0 -type d -mtime +7 -exec rm -rf {} +
+
+      - name: Notify on success
+        if: success()
+        run: echo "Deployment successful"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "Deployment failed"
