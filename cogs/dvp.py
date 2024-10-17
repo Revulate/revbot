@@ -11,9 +11,10 @@ from playwright.async_api import async_playwright
 from tenacity import retry, stop_after_attempt, wait_exponential
 import re
 from dotenv import load_dotenv
+import validators
 
 from twitch_helix_client import TwitchAPI
-from logger import log_error, log_info, log_warning
+from logger import log_error, log_info, log_warning, log_debug
 from utils import is_valid_url
 
 
@@ -29,6 +30,7 @@ class DVP(commands.Cog):
         self.db_initialized = asyncio.Event()
         self.last_scrape_time = None
         self.browser = None
+        self.image_url_cache = {}
 
         if not self.sheet_id or not self.creds_file:
             raise ValueError("GOOGLE_SHEET_ID and GOOGLE_CREDENTIALS_FILE must be set in environment variables")
@@ -77,6 +79,7 @@ class DVP(commands.Cog):
         await self.setup_database()
         await self.load_last_scrape_time()
         await self.initialize_data()
+        await self.load_image_url_cache()  # Load image URLs from the database
         self.update_scrape_task = asyncio.create_task(self.periodic_scrape_update())
         log_info("DVP cog initialized successfully")
 
@@ -96,9 +99,10 @@ class DVP(commands.Cog):
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL UNIQUE,
                         time_played INTEGER NOT NULL,
-                        last_played DATE NOT NULL
+                        last_played DATE NOT NULL,
+                        image_url TEXT
                     )
-                """
+                    """
                 )
                 await db.execute(
                     """
@@ -106,7 +110,7 @@ class DVP(commands.Cog):
                         key TEXT PRIMARY KEY,
                         value TEXT
                     )
-                """
+                    """
                 )
                 await db.commit()
             log_info("Database setup complete")
@@ -185,8 +189,8 @@ class DVP(commands.Cog):
                                 last_played = datetime.now(timezone.utc).date()
                             await db.execute(
                                 """
-                                INSERT INTO games (name, time_played, last_played)
-                                VALUES (?, ?, ?)
+                                INSERT INTO games (name, time_played, last_played, image_url)
+                                VALUES (?, ?, ?, NULL)
                                 ON CONFLICT(name) DO UPDATE SET
                                     time_played = excluded.time_played,
                                     last_played = excluded.last_played
@@ -202,6 +206,18 @@ class DVP(commands.Cog):
             if self.browser:
                 await self.browser.close()
                 self.browser = None
+
+    async def load_image_url_cache(self):
+        log_info("Loading image URL cache from database")
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("SELECT name, image_url FROM games WHERE image_url IS NOT NULL") as cursor:
+                    rows = await cursor.fetchall()
+                    for name, image_url in rows:
+                        self.image_url_cache[name] = image_url
+            log_info(f"Loaded {len(self.image_url_cache)} image URLs into cache")
+        except Exception as e:
+            log_error(f"Error loading image URL cache: {e}", exc_info=True)
 
     def parse_time(self, time_str):
         total_minutes = 0
@@ -238,18 +254,44 @@ class DVP(commands.Cog):
 
         return time_str, total_minutes
 
-    def format_playtime(self, total_minutes):
-        days, remaining_minutes = divmod(total_minutes, 24 * 60)
-        hours, minutes = divmod(remaining_minutes, 60)
-
+    def format_playtime(self, minutes):
+        days, remainder = divmod(minutes, 1440)
+        hours, minutes = divmod(remainder, 60)
+        parts = []
         if days > 0:
-            total_hours = total_minutes / 60.0
-            time_played = f"{int(days)}d {int(hours)}h {int(minutes)}m ({total_hours:.2f} hours)"
-        elif hours > 0:
-            time_played = f"{int(hours)}h {int(minutes)}m"
+            parts.append(f"{days} day{'s' if days > 1 else ''}")
+        if hours > 0:
+            parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+        if minutes > 0:
+            parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
+        return ", ".join(parts) if parts else "0 minutes"
+
+    async def get_game_image_url(self, game_name):
+        if game_name in self.image_url_cache:
+            log_info(f"Using cached image URL for '{game_name}': {self.image_url_cache[game_name]}")
+            return self.image_url_cache[game_name]
+
+        url = await self.twitch_api.get_game_image_url(game_name)
+        if url:
+            if validators.url(url):
+                self.image_url_cache[game_name] = url
+                await self.save_game_image_url(game_name, url)
+                log_info(f"Generated and cached new image URL for '{game_name}': {url}")
+            else:
+                log_warning(f"Invalid image URL generated for '{game_name}': {url}")
         else:
-            time_played = f"{int(minutes)}m"
-        return time_played
+            log_warning(f"No image found for game: {game_name}")
+
+        return url
+
+    async def save_game_image_url(self, game_name, url):
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("UPDATE games SET image_url = ? WHERE name = ?", (url, game_name))
+                await db.commit()
+            log_info(f"Saved image URL for '{game_name}' to database.")
+        except Exception as e:
+            log_error(f"Error saving image URL to database for '{game_name}': {e}", exc_info=True)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def update_google_sheet(self):
@@ -260,7 +302,7 @@ class DVP(commands.Cog):
 
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
-                "SELECT name, time_played, last_played FROM games WHERE name != 'Unknown' ORDER BY last_played DESC"
+                "SELECT name, time_played, last_played, image_url FROM games WHERE name != 'Unknown' ORDER BY last_played DESC"
             ) as cursor:
                 rows = await cursor.fetchall()
 
@@ -268,10 +310,13 @@ class DVP(commands.Cog):
         data = [headers]
 
         for row in rows:
-            name, minutes, last_played = row
-            game_image_url = await self.twitch_api.get_game_image_url(name)
+            name, minutes, last_played, game_image_url = row
+            if game_image_url:
+                log_info(f"Using cached image URL for Google Sheet update: '{name}' -> {game_image_url}")
+            else:
+                game_image_url = await self.get_game_image_url(name)
 
-            if game_image_url and not is_valid_url(game_image_url):
+            if game_image_url and not validators.url(game_image_url):
                 log_warning(f"Invalid image URL for game '{name}': {game_image_url}")
                 img_formula = ""
             else:
