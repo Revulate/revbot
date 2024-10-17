@@ -4,16 +4,8 @@ module.exports = {
     script: "bot.py",
     interpreter: process.platform === "win32" ? "python" : "/home/actionsrunner/revbot/venv/bin/python",
     interpreter_args: "-u",  // Use unbuffered mode
-    watch: true,
-    ignore_watch: [
-      "node_modules",
-      "logs",
-      "*.log",
-      "*.db",
-      "*.db-journal",
-      ".git"
-    ],
-    instances: 1,  // Ensure only one instance is started
+    watch: false,  // Disable watch mode
+    instances: 1,  // Explicitly set to 1 instance
     exec_mode: "fork",
     max_memory_restart: "1G",
     env: {
@@ -34,9 +26,6 @@ module.exports = {
     autorestart: true,
     instance_var: 'INSTANCE_ID',
     merge_logs: true,
-    kill_timeout: 5000,
-    shutdown_with_message: true,
-    wait_ready: true,
     max_restarts: 10,
     min_uptime: "1m",
     listen_timeout: 8000,
