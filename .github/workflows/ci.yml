@@ -70,9 +70,13 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           set -e
-          REVUBOT_DIR=~/revbot
+          echo "Current user: $(whoami)"
+          echo "Home directory: $HOME"
+          echo "Current directory: $(pwd)"
+          
+          REVUBOT_DIR=$HOME/revbot
           REPO_URL=https://github.com/Revulate/revbot.git
-          BACKUP_DIR=~/revbot_backup_$(date +%Y%m%d_%H%M%S)
+          BACKUP_DIR=$HOME/revbot_backup_$(date +%Y%m%d_%H%M%S)
 
           # Backup current version
           if [ -d "$REVUBOT_DIR" ]; then
@@ -94,23 +98,19 @@ jobs:
             python3.11 -m venv venv
           fi
           source venv/bin/activate
-          if [ ! -f "venv/.requirements_installed" ] || ! cmp -s requirements.txt venv/.requirements_installed; then
-            pip install -r requirements.txt
-            cp requirements.txt venv/.requirements_installed
-          fi
+          pip install -r requirements.txt
 
           # Ensure correct file permissions for credentials.json
           echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
           chmod 600 credentials.json
 
-          # Install Node.js and PM2 if not present
-          if ! sudo -n command -v node &> /dev/null; then
-            sudo -n curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -n bash -
-            sudo -n apt-get install -y nodejs
-          fi
+          # Install Node.js if not present (assuming it's already installed)
+          node -v || echo "Node.js not found. Please install it manually."
 
-          if ! sudo -n command -v pm2 &> /dev/null; then
-            sudo -n npm install -g pm2
+          # Install PM2 locally if not present
+          if ! command -v pm2 &> /dev/null; then
+            npm install pm2
+            export PATH="$PATH:$HOME/revbot/node_modules/.bin"
           fi
 
           # Create or update PM2 ecosystem config
@@ -144,33 +144,20 @@ jobs:
           fi
 
           # Start or restart the bot using PM2
-          sudo -u $USER pm2 start ecosystem.config.js --update-env || sudo -u $USER pm2 delete twitch-bot && sudo -u $USER pm2 start ecosystem.config.js --update-env
-          sudo -u $USER pm2 save
-          sudo -n pm2 startup systemd -u $USER --hp $HOME
+          pm2 start ecosystem.config.js --update-env || pm2 delete twitch-bot && pm2 start ecosystem.config.js --update-env
+          pm2 save
 
           # Health check
           sleep 10
-          if ! sudo -u $USER pm2 list | grep -q "online"; then
+          if ! pm2 list | grep -q "online"; then
             echo "Error: twitch-bot is not running after restart"
             # Rollback
             echo "Rolling back to previous version..."
             rm -rf $REVUBOT_DIR
             mv $BACKUP_DIR $REVUBOT_DIR
             cd $REVUBOT_DIR
-            sudo -u $USER pm2 start ecosystem.config.js --update-env
+            pm2 start ecosystem.config.js --update-env
             exit 1
           fi
 
           echo "Deployment completed successfully"
-
-      - name: Cleanup old backups
-        run: |
-          find ~/revbot_backup_* -maxdepth 0 -type d -mtime +7 -exec rm -rf {} +
-
-      - name: Notify on success
-        if: success()
-        run: echo "Deployment successful" # Replace with your notification method
-
-      - name: Notify on failure
-        if: failure()
-        run: echo "Deployment failed" # Replace with your notification method
