@@ -5,22 +5,25 @@ from datetime import datetime, timezone, timedelta
 from twitchio.ext import commands
 from twitchio import PartialUser, Channel
 from typing import List, Optional, Tuple
-import validators
+import sys
+import os
 import sqlite3
+import validators
+from logger import log_info, log_error, log_warning, log_debug, get_logger
 
-logger = logging.getLogger("twitch_bot.utils")
+logger = get_logger("twitch_bot.utils")
+
+# Add the virtual environment's site-packages to sys.path
+venv_path = os.getenv("PYTHONPATH")
+if venv_path:
+    sys.path.append(venv_path)
 
 
 def normalize_username(username: str) -> str:
-    """Remove @ symbol from the beginning of a username if present."""
     return username.lstrip("@")
 
 
 def split_message(message: str, max_length: int = 500) -> List[str]:
-    """
-    Splits a message into chunks of at most max_length characters,
-    trying to split at sentence boundaries for better readability.
-    """
     if len(message) <= max_length:
         return [message]
 
@@ -29,7 +32,6 @@ def split_message(message: str, max_length: int = 500) -> List[str]:
 
 
 def _chunk_sentences(sentences: List[str], max_length: int) -> List[str]:
-    """Helper function to chunk sentences into smaller messages."""
     messages, current_chunk = [], ""
 
     for sentence in sentences:
@@ -49,7 +51,6 @@ def _chunk_sentences(sentences: List[str], max_length: int) -> List[str]:
 
 
 def _split_long_sentence(sentence: str, max_length: int) -> List[str]:
-    """Helper function to split a long sentence into smaller parts."""
     words = sentence.split()
     sub_chunks, current_chunk = [], ""
 
@@ -66,7 +67,6 @@ def _split_long_sentence(sentence: str, max_length: int) -> List[str]:
 
 
 def remove_duplicate_sentences(text: str) -> str:
-    """Removes duplicate sentences from the provided text."""
     sentences = re.split(r"(?<=[.!?]) +", text)
     seen, unique_sentences = set(), []
 
@@ -80,7 +80,6 @@ def remove_duplicate_sentences(text: str) -> str:
 
 
 async def fetch_user(bot: commands.Bot, user_identifier: str) -> Optional[PartialUser]:
-    """Fetches a user by name or ID."""
     try:
         user_identifier = user_identifier.lstrip("@")
         users = (
@@ -90,25 +89,22 @@ async def fetch_user(bot: commands.Bot, user_identifier: str) -> Optional[Partia
         )
         return users[0] if users else None
     except Exception as e:
-        logger.error(f"Error fetching user '{user_identifier}': {e}")
+        log_error(f"Error fetching user '{user_identifier}': {e}")
         return None
 
 
 def get_channel(bot: commands.Bot, channel_name: str) -> Optional[Channel]:
-    """Retrieves a channel object by name."""
     channel = bot.get_channel(channel_name)
     if not channel:
-        logger.warning(f"Channel '{channel_name}' not found in bot's connected channels.")
+        log_warning(f"Channel '{channel_name}' not found in bot's connected channels.")
     return channel
 
 
 def expand_time_units(time_str: str) -> str:
-    """Inserts spaces between numbers and letters if needed."""
     return re.sub(r"(\d)([a-zA-Z])", r"\1 \2", time_str)
 
 
 def parse_time_string(time_str: str) -> Optional[timedelta]:
-    """Parses a time duration string into a timedelta."""
     time_str = time_str.lower().replace(",", " ").replace("and", " ").replace("-", " ")
     pattern = r"(?P<value>\d+(\.\d+)?)\s*(?P<unit>[a-zA-Z]+)"
     matches = re.finditer(pattern, time_str)
@@ -140,7 +136,6 @@ def parse_time_string(time_str: str) -> Optional[timedelta]:
 
 
 def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tuple[Optional[datetime], str]:
-    """Parses the command arguments to extract time and message."""
     from dateparser import parse
 
     time_keywords = ["in", "on", "after"]
@@ -176,14 +171,12 @@ def parse_time(args: List[str], expect_time_keyword_at_start: bool = True) -> Tu
 
 
 def format_time_delta(delta: timedelta) -> str:
-    """Formats a timedelta into a human-readable string with multiple units."""
     total_seconds = int(delta.total_seconds())
     periods = [("d", 86400), ("h", 3600), ("m", 60), ("s", 1)]
     return " ".join(f"{value}{name}" for name, seconds in periods if (value := total_seconds // seconds)) or "0s"
 
 
 def format_duration(seconds):
-    """Formats the duration from seconds to a human-readable string."""
     seconds = int(seconds)
     weeks, remainder = divmod(seconds, 604800)
     days, remainder = divmod(remainder, 86400)
@@ -198,21 +191,17 @@ def format_duration(seconds):
 
 
 def get_afk_duration(start_time):
-    """Calculates the AFK duration in seconds."""
     return time.time() - start_time
 
 
 def get_database_connection(db_path="bot.db") -> sqlite3.Connection:
-    """Establishes a connection to the SQLite database."""
     return sqlite3.connect(db_path)
 
 
 def setup_database(db_path="bot.db"):
-    """Sets up the bot database with the necessary tables."""
     with get_database_connection(db_path) as conn:
         cursor = conn.cursor()
 
-        # Reminders table
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS reminders (
@@ -233,7 +222,6 @@ def setup_database(db_path="bot.db"):
         """
         )
 
-        # User stats table
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_stats (
@@ -246,7 +234,6 @@ def setup_database(db_path="bot.db"):
         """
         )
 
-        # AFK table
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS afk (
@@ -260,18 +247,14 @@ def setup_database(db_path="bot.db"):
         """
         )
 
-        # Add more tables as needed for other features
-
         conn.commit()
 
 
 def is_valid_url(url: str) -> bool:
-    """Validates if the provided string is a valid URL."""
     return validators.url(url)
 
 
 def format_time_ago(timestamp: datetime) -> str:
-    """Formats a timestamp into a human-readable 'time ago' string."""
     now = datetime.now(timezone.utc)
     delta = now - timestamp
     if delta.days > 365:

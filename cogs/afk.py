@@ -2,6 +2,7 @@ import time
 import aiosqlite
 from twitchio.ext import commands
 import re
+from logger import log_info, log_error, log_warning, log_debug
 
 
 class Afk(commands.Cog):
@@ -60,6 +61,7 @@ class Afk(commands.Cog):
             )
             await conn.commit()
 
+        log_info(f"User {username} is now AFK: {full_reason}")
         await ctx.send(f"@{username} is now {full_reason}")
 
     @commands.command(name="rafk")
@@ -87,14 +89,18 @@ class Afk(commands.Cog):
                             (user_id,),
                         )
                         await conn.commit()
+                        log_info(f"User {username} has resumed AFK: {full_reason}")
                         await ctx.send(f"@{username} has resumed {full_reason}")
                     else:
+                        log_warning(f"User {username} attempted to resume AFK after more than 5 minutes")
                         await ctx.send(
                             f"@{username}, it's been more than 5 minutes since you returned. Cannot resume AFK."
                         )
                 else:
+                    log_warning(f"User {username} attempted to resume AFK but was not eligible")
                     await ctx.send(f"@{username}, you are not eligible to resume AFK.")
             else:
+                log_warning(f"User {username} attempted to resume AFK but had no AFK status")
                 await ctx.send(f"@{username}, you have no AFK status to resume.")
 
     @commands.Cog.event()
@@ -131,6 +137,7 @@ class Afk(commands.Cog):
                         (time.time(), user_id),
                     )
                     await conn.commit()
+                    log_info(f"User {username} has returned from AFK")
 
     async def _send_afk_return_message(self, message, user_id, username, afk_time, full_reason):
         afk_duration = time.time() - afk_time

@@ -1,11 +1,12 @@
 import aiohttp
 import asyncio
 import datetime
-from logger import log_error, log_info, log_warning
 import os
 import urllib.parse
 from dotenv import load_dotenv, set_key
 import validators
+import backoff
+from logger import log_info, log_error, log_warning, log_debug, get_logger
 
 
 class TwitchAPI:
@@ -40,7 +41,6 @@ class TwitchAPI:
         self.token_expiry = datetime.datetime.fromisoformat(expiry) if expiry else None
 
     def save_tokens(self):
-        # Ensure there are no trailing newlines or extra quotes
         access_token = self.oauth_token.strip()
         refresh_token = self.refresh_token.strip()
         expiry = self.token_expiry.isoformat() if self.token_expiry else ""
@@ -81,6 +81,7 @@ class TwitchAPI:
                 log_error(f"Failed to exchange code for token: {await response.text()}")
                 return False
 
+    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def refresh_oauth_token(self):
         if not self.refresh_token:
             log_error("No refresh token available")
@@ -101,7 +102,7 @@ class TwitchAPI:
                         self.refresh_token = data.get("refresh_token", self.refresh_token)
                         self.token_expiry = datetime.datetime.now() + datetime.timedelta(seconds=data["expires_in"])
                         self.save_tokens()
-                        load_dotenv(override=True)  # Force reloading updated tokens
+                        load_dotenv(override=True)
                         log_info("OAuth token refreshed successfully")
                         return True
                     else:
@@ -118,6 +119,7 @@ class TwitchAPI:
                 raise Exception("Failed to refresh OAuth token")
         return True
 
+    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def api_request(self, endpoint, params=None, method="GET", data=None):
         await self.ensure_session()
         await self.ensure_token_valid()

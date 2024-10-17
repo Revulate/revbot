@@ -1,8 +1,7 @@
-# cogs/admin.py
-
 import os
 from twitchio.ext import commands
 from dotenv import load_dotenv
+from logger import log_info, log_error, log_warning, log_debug
 
 load_dotenv()
 
@@ -22,8 +21,10 @@ class Admin(commands.Cog):
             return
         try:
             self.bot.load_module(f"cogs.{cog}")
+            log_info(f"Admin {ctx.author.name} loaded cog '{cog}'")
             await ctx.send(f"@{ctx.author.name}, successfully loaded cog '{cog}'.")
         except Exception as e:
+            log_error(f"Failed to load cog '{cog}': {str(e)}")
             await ctx.send(f"@{ctx.author.name}, failed to load cog '{cog}': {str(e)}")
 
     @commands.command(name="unload")
@@ -33,8 +34,10 @@ class Admin(commands.Cog):
             return
         try:
             self.bot.unload_module(f"cogs.{cog}")
+            log_info(f"Admin {ctx.author.name} unloaded cog '{cog}'")
             await ctx.send(f"@{ctx.author.name}, successfully unloaded cog '{cog}'.")
         except Exception as e:
+            log_error(f"Failed to unload cog '{cog}': {str(e)}")
             await ctx.send(f"@{ctx.author.name}, failed to unload cog '{cog}': {str(e)}")
 
     @commands.command(name="reload")
@@ -44,8 +47,10 @@ class Admin(commands.Cog):
             return
         try:
             self.bot.reload_module(f"cogs.{cog}")
+            log_info(f"Admin {ctx.author.name} reloaded cog '{cog}'")
             await ctx.send(f"@{ctx.author.name}, successfully reloaded cog '{cog}'.")
         except Exception as e:
+            log_error(f"Failed to reload cog '{cog}': {str(e)}")
             await ctx.send(f"@{ctx.author.name}, failed to reload cog '{cog}': {str(e)}")
 
     @commands.command(name="reloadall")
@@ -61,12 +66,15 @@ class Admin(commands.Cog):
         for cog in cogs:
             try:
                 self.bot.reload_module(f"cogs.{cog}")
+                log_info(f"Reloaded cog '{cog}'")
             except Exception as e:
                 failed_cogs.append(f"{cog}: {str(e)}")
+                log_error(f"Failed to reload cog '{cog}': {str(e)}")
 
         if failed_cogs:
             await ctx.send(f"@{ctx.author.name}, failed to reload some cogs: {', '.join(failed_cogs)}")
         else:
+            log_info(f"Admin {ctx.author.name} reloaded all cogs")
             await ctx.send(f"@{ctx.author.name}, successfully reloaded all cogs.")
 
     @commands.command(name="listcogs")
@@ -77,6 +85,7 @@ class Admin(commands.Cog):
 
         cogs_dir = "cogs"
         cogs = [f[:-3] for f in os.listdir(cogs_dir) if f.endswith(".py") and not f.startswith("__")]
+        log_info(f"Admin {ctx.author.name} listed cogs")
         await ctx.send(f"@{ctx.author.name}, available cogs: {', '.join(cogs)}")
 
 

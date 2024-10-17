@@ -2,24 +2,21 @@ from dotenv import load_dotenv
 from twitchio.ext import commands
 from datetime import datetime, timezone
 from utils import normalize_username
+from logger import log_info, log_error, log_warning, log_debug
 
 load_dotenv()
 
 
 class User(commands.Cog):
-    """Cog for displaying Twitch user information."""
-
     def __init__(self, bot):
         self.bot = bot
 
     def format_enum(self, enum_value):
-        """Format enum value to a readable string."""
         if enum_value is None:
             return "None"
         return str(enum_value).split(".")[-1].capitalize()
 
     def format_account_age(self, created_at):
-        """Format account age to include years, months, and the exact creation date."""
         now = datetime.now(timezone.utc)
         age = now - created_at
         years, remainder = divmod(age.days, 365)
@@ -37,30 +34,23 @@ class User(commands.Cog):
         return f"{age_str} ago (Created on {created_at.strftime('%Y-%m-%d')})"
 
     async def get_ban_info(self, broadcaster_id, user_id):
-        """Fetch ban information for a user in a specific broadcaster's channel."""
         try:
             if hasattr(self.bot, "fetch_channel_bans"):
                 bans = await self.bot.fetch_channel_bans(broadcaster_id, user_ids=[user_id])
                 return bans[0] if bans else None
             else:
-                self.bot.logger.warning("fetch_channel_bans method not available. Unable to fetch ban info.")
+                log_warning("fetch_channel_bans method not available. Unable to fetch ban info.")
                 return None
         except Exception as e:
-            self.bot.logger.error(f"Error fetching ban info: {e}")
+            log_error(f"Error fetching ban info: {e}")
             return None
 
     @commands.command(name="user")
     async def user_command(self, ctx: commands.Context, username: str = None):
-        """
-        Fetches and displays information about a Twitch user.
-        Usage: #user <username>
-        If no username is provided, it shows information about the command user.
-        """
         if username:
             username = normalize_username(username)
 
         try:
-            # Fetch the target user's information
             users = await self.bot.fetch_users(names=[username])
             if not users:
                 await ctx.send(f"@{ctx.author.name}, no user found with the name '{username}'.")
@@ -69,7 +59,6 @@ class User(commands.Cog):
             user = users[0]
             account_age = self.format_account_age(user.created_at)
 
-            # Fetch the broadcaster's user ID
             broadcaster_name = ctx.channel.name
             broadcasters = await self.bot.fetch_users(names=[broadcaster_name])
             if not broadcasters:
@@ -79,7 +68,6 @@ class User(commands.Cog):
             broadcaster = broadcasters[0]
             broadcaster_id = broadcaster.id
 
-            # Fetch ban information
             ban_info = await self.get_ban_info(broadcaster_id, user.id)
 
             response = (
@@ -104,8 +92,9 @@ class User(commands.Cog):
                 )
 
             await ctx.send(response)
+            log_info(f"User info sent for {username}")
         except Exception as e:
-            self.bot.logger.error(f"Error fetching user info: {e}")
+            log_error(f"Error fetching user info: {e}")
             await ctx.send(
                 f"@{ctx.author.name}, an error occurred while fetching user information. Please try again later."
             )

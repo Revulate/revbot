@@ -3,13 +3,12 @@ from dotenv import load_dotenv
 from twitchio.ext import commands
 from asyncio import sleep
 from datetime import datetime, timezone
+from logger import log_info, log_error, log_warning, log_debug
 
 load_dotenv()
 
 
 class Preview(commands.Cog):
-    """Cog for displaying the preview thumbnail and details of a specified Twitch channel."""
-
     def __init__(self, bot):
         self.bot = bot
         self.client_id = os.getenv("TWITCH_CLIENT_ID")
@@ -18,35 +17,29 @@ class Preview(commands.Cog):
             raise ValueError("TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET must be set in the environment variables.")
 
     async def get_channel_info(self, channel_name):
-        """Fetch channel information from Twitch API."""
         try:
-            # Fetch user information
             users = await self.bot.fetch_users(names=[channel_name])
             if not users:
                 return None
             user = users[0]
 
-            # Fetch channel information
             channels = await self.bot.fetch_channels([user.id])
             if not channels:
                 return None
             channel_info = channels[0]
 
-            # Fetch stream information
             streams = await self.bot.fetch_streams(user_ids=[user.id])
             stream_data = streams[0] if streams else None
 
-            # Fetch videos for last live information
             videos = await self.bot.fetch_videos(user_id=user.id, type="archive")
             last_video = videos[0] if videos else None
 
             return {"user": user, "channel_info": channel_info, "stream_data": stream_data, "last_video": last_video}
         except Exception as e:
-            self.bot.logger.error(f"Error fetching channel info: {e}")
+            log_error(f"Error fetching channel info: {e}")
             return None
 
     def format_duration(self, duration):
-        """Format timedelta into a human-readable string."""
         if not duration:
             return "Unknown duration"
         days, seconds = duration.days, duration.seconds
@@ -67,10 +60,6 @@ class Preview(commands.Cog):
 
     @commands.command(name="preview")
     async def preview_command(self, ctx: commands.Context, channel_name: str):
-        """
-        Posts the preview thumbnail and stream details of the specified Twitch channel.
-        Usage: #preview <channel_name>
-        """
         if not channel_name:
             await ctx.send(f"@{ctx.author.name}, please provide a channel name to get the preview information.")
             return
@@ -78,11 +67,11 @@ class Preview(commands.Cog):
         retry_count = 3
         for attempt in range(retry_count):
             try:
-                self.bot.logger.debug(f"Getting info for channel '{channel_name}' (Attempt {attempt + 1})")
+                log_debug(f"Getting info for channel '{channel_name}' (Attempt {attempt + 1})")
                 channel_data = await self.get_channel_info(channel_name)
 
                 if not channel_data:
-                    self.bot.logger.error(f"Invalid or missing channel information for '{channel_name}'.")
+                    log_error(f"Invalid or missing channel information for '{channel_name}'.")
                     await ctx.send(
                         f"@{ctx.author.name}, could not retrieve valid channel information for '{channel_name}'. Please ensure the channel name is correct."
                     )
@@ -99,7 +88,6 @@ class Preview(commands.Cog):
                     status = f"LIVE ({self.format_duration(duration)})" if duration else "LIVE"
                     viewers = f"{stream_data.viewer_count:,} viewers"
 
-                    # Use the original thumbnail URL without specifying dimensions
                     thumbnail_url = stream_data.thumbnail_url.replace("{width}", "").replace("{height}", "")
 
                     response = (
@@ -110,7 +98,7 @@ class Preview(commands.Cog):
                         f"Title: {channel_info.title} | "
                         f"Preview: {thumbnail_url}"
                     )
-                    self.bot.logger.info(f"Sending preview response for {channel_name}: {response}")
+                    log_info(f"Sending preview response for {channel_name}: {response}")
                     await ctx.send(response)
                 else:
                     status = "OFFLINE"
@@ -126,17 +114,15 @@ class Preview(commands.Cog):
                         f"Category: {channel_info.game_name} | "
                         f"Title: {channel_info.title}"
                     )
-                    self.bot.logger.info(f"Sending offline preview response for {channel_name}: {response}")
+                    log_info(f"Sending offline preview response for {channel_name}: {response}")
                     await ctx.send(response)
 
-                self.bot.logger.debug(f"Sent preview info for '{channel_name}' to chat.")
-
-                self.bot.logger.debug(f"Sent preview info for '{channel_name}' to chat.")
+                log_debug(f"Sent preview info for '{channel_name}' to chat.")
                 break
             except Exception as e:
-                self.bot.logger.error(f"Attempt {attempt + 1} failed with error: {e}")
+                log_error(f"Attempt {attempt + 1} failed with error: {e}")
                 if attempt < retry_count - 1:
-                    await sleep(2)  # Wait before retrying
+                    await sleep(2)
                 else:
                     await ctx.send(
                         f"@{ctx.author.name}, an error occurred while processing your request. Please try again later."

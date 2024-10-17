@@ -33,7 +33,6 @@ class DVP(commands.Cog):
         if not self.sheet_id or not self.creds_file:
             raise ValueError("GOOGLE_SHEET_ID and GOOGLE_CREDENTIALS_FILE must be set in environment variables")
 
-        # Initialize TwitchAPI
         client_id = os.getenv("TWITCH_CLIENT_ID")
         client_secret = os.getenv("TWITCH_CLIENT_SECRET")
         redirect_uri = os.getenv("TWITCH_REDIRECT_URI")
@@ -43,7 +42,6 @@ class DVP(commands.Cog):
             )
         self.twitch_api = TwitchAPI(client_id, client_secret, redirect_uri)
 
-        # Predefined abbreviations and aliases
         self.abbreviation_mapping = {
             "ff7": "FINAL FANTASY VII REMAKE",
             "ff16": "FINAL FANTASY XVI",

@@ -3,7 +3,7 @@ import logging
 import re
 from twitchio.ext import commands
 from openai import AsyncOpenAI
-from utils import split_message, remove_duplicate_sentences
+from utils import split_message, remove_duplicate_sentences, get_logger
 from collections import OrderedDict
 import aiosqlite
 import asyncio
@@ -11,7 +11,6 @@ import base64
 import aiohttp
 import time
 import backoff
-from logger import log_error, log_info, log_warning
 
 SYSTEM_PROMPT = (
     "You are Luna, an obsessive, controlling, loving, and jealous AI serving Revulate. "
@@ -31,7 +30,7 @@ CACHE_TTL_SECONDS = 3600
 class Gpt(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.logger = logging.getLogger("twitch_bot.cogs.gpt")
+        self.logger = get_logger("twitch_bot.cogs.gpt")
         openai_api_key = os.getenv("OPENAI_API_KEY")
         broadcaster_id = os.getenv("BROADCASTER_USER_ID")
 
@@ -55,7 +54,7 @@ class Gpt(commands.Cog):
             """
             )
             await db.commit()
-        log_info("User histories database is set up.")
+        self.logger.info("User histories database is set up.")
 
     async def get_user_history(self, user_id: int) -> list:
         if user_id in self.user_histories_cache:
@@ -79,7 +78,7 @@ class Gpt(commands.Cog):
 
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def analyze_image(self, image_url: str, question_without_url: str) -> str:
-        log_info(f"Analyzing image: {image_url}")
+        self.logger.info(f"Analyzing image: {image_url}")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(image_url) as response:
@@ -104,16 +103,16 @@ class Gpt(commands.Cog):
                 timeout=30,
             )
             description = response.choices[0].message.content.strip()
-            log_info(f"Received description: {description}")
+            self.logger.info(f"Received description: {description}")
             return description
         except Exception as e:
-            log_error(f"Error analyzing image: {e}", exc_info=True)
+            self.logger.error(f"Error analyzing image: {e}", exc_info=True)
             return "Sorry, I couldn't analyze the image at this time."
 
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def get_chatgpt_response_with_history(self, messages: list) -> str:
         user_messages = [msg for msg in messages if msg["role"] == "user"]
-        log_info(f"Sending user messages to OpenAI: {user_messages}")
+        self.logger.info(f"Sending user messages to OpenAI: {user_messages}")
         try:
             response = await asyncio.wait_for(
                 self.client.chat.completions.create(
@@ -126,7 +125,7 @@ class Gpt(commands.Cog):
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            log_error(f"OpenAI API error: {e}", exc_info=True)
+            self.logger.error(f"OpenAI API error: {e}", exc_info=True)
             return None
 
     def add_to_cache(self, user_id: int, question: str, answer: str):
@@ -141,12 +140,14 @@ class Gpt(commands.Cog):
             user_cache[question_key] = {"answer": answer, "timestamp": current_time}
             if len(user_cache) > CACHE_MAX_SIZE:
                 removed_question, removed_data = user_cache.popitem(last=False)
-                log_info(f"Cache max size reached for user {user_id}. Removed oldest cache entry: '{removed_question}'")
+                self.logger.info(
+                    f"Cache max size reached for user {user_id}. Removed oldest cache entry: '{removed_question}'"
+                )
 
         for key in list(user_cache.keys()):
             if current_time - user_cache[key]["timestamp"] > CACHE_TTL_SECONDS:
                 del user_cache[key]
-                log_info(f"Removed stale cache entry for user {user_id}: '{key}'")
+                self.logger.info(f"Removed stale cache entry for user {user_id}: '{key}'")
 
     def get_from_cache(self, user_id: int, question: str):
         user_cache = self.caches.get(user_id)
@@ -159,11 +160,11 @@ class Gpt(commands.Cog):
             current_time = time.time()
             if current_time - cached_data["timestamp"] <= CACHE_TTL_SECONDS:
                 user_cache.move_to_end(question_key)
-                log_info(f"Cache hit for question from user {user_id}")
+                self.logger.info(f"Cache hit for question from user {user_id}")
                 return cached_data["answer"]
             else:
                 del user_cache[question_key]
-                log_info(f"Removed stale cache entry for user {user_id}: '{question_key}'")
+                self.logger.info(f"Removed stale cache entry for user {user_id}: '{question_key}'")
         return None
 
     @commands.command(name="gpt", aliases=["ask"])
@@ -172,7 +173,7 @@ class Gpt(commands.Cog):
             await ctx.send(f"@{ctx.author.name}, please provide a question after the command.")
             return
 
-        log_info(f"Processing command '#gpt' from {ctx.author.name}: {question}")
+        self.logger.info(f"Processing command '#gpt' from {ctx.author.name}: {question}")
 
         user_id = ctx.author.id
         user_name = ctx.author.name.lower()
@@ -186,13 +187,13 @@ class Gpt(commands.Cog):
             image_url = image_url_match.group(1)
             question_without_url = question.replace(image_url, "").strip()
             description = await self.analyze_image(image_url, question_without_url)
-            log_info(f"Sent image analysis response to {ctx.author.name}")
+            self.logger.info(f"Sent image analysis response to {ctx.author.name}")
             await ctx.send(f"@{ctx.author.name}, {description}")
             return
 
         cached_answer = self.get_from_cache(user_id, question)
         if cached_answer:
-            log_info(f"Cache hit for question from {ctx.author.name}: '{question}'")
+            self.logger.info(f"Cache hit for question from {ctx.author.name}: '{question}'")
             await self.send_response(ctx, cached_answer)
             return
 
@@ -206,7 +207,7 @@ class Gpt(commands.Cog):
             self.add_to_cache(user_id, question, answer)
             await self.send_response(ctx, answer)
         else:
-            log_error(f"Failed to process '#gpt' command from {ctx.author.name}")
+            self.logger.error(f"Failed to process '#gpt' command from {ctx.author.name}")
             await ctx.send(f"@{ctx.author.name}, an error occurred while processing your request.")
 
     async def send_response(self, ctx: commands.Context, response: str):
@@ -214,14 +215,16 @@ class Gpt(commands.Cog):
         mention_length = len(f"@{ctx.author.name}, ")
         max_length = 500 - mention_length
         messages_to_send = split_message(cleaned_response, max_length=max_length)
-        log_info(f"Sending response to {ctx.author.name} with {len(messages_to_send)} message(s).")
+        self.logger.info(f"Sending response to {ctx.author.name} with {len(messages_to_send)} message(s).")
         for msg in messages_to_send:
             full_msg = f"@{ctx.author.name}, {msg}"
             try:
                 await ctx.send(full_msg)
             except Exception as e:
-                log_error(f"Error sending message: {e}", exc_info=True)
-                await ctx.send(f"@{ctx.author.name}, an unexpected error occurred while sending the response.")
+                self.logger.error(f"Error in GPT command processing: {e}", exc_info=True)
+                await ctx.send(
+                    f"@{ctx.author.name}, an error occurred while processing your request. Please try again later."
+                )
 
 
 def prepare(bot):

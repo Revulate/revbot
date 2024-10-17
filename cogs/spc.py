@@ -7,12 +7,13 @@ from twitchio.ext import commands
 from rapidfuzz import process, fuzz
 import time
 from collections import OrderedDict
+from utils import get_logger
 
 
 class Spc(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.logger = logging.getLogger("twitch_bot.cogs.spc")
+        self.logger = get_logger("twitch_bot.cogs.spc")
         self.logger.setLevel(logging.INFO)
         self.steam_api_key = os.getenv("API_STEAM_KEY")
         self.db_path = "steam_game.db"
@@ -133,7 +134,9 @@ class Spc(commands.Cog):
             await ctx.send(f"@{ctx.author.name}, could not retrieve details for game ID {gameID}.")
             return
 
+        steam_url = f"https://store.steampowered.com/app/{gameID}"
         reply = f"{game_details['name']} (by {', '.join(game_details['developers'])}) currently has **{player_count}** players in-game."
+        reply += f" Steam URL: {steam_url}"
         if reviews_string:
             reply += f" {reviews_string}"
 

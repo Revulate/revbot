@@ -6,31 +6,31 @@ from utils import setup_database
 async def run_manual_tests():
     # Set up the database
     setup_database()
-    print("Database setup complete.")
+    log_info("Database setup complete.")
 
     bot = TwitchBot()
 
     # Test bot initialization
-    print(f"Bot initialized with nick: {bot.nick}")
-    print(f"Bot prefix: {bot._prefix}")
+    log_info(f"Bot initialized with nick: {bot.nick}")
+    log_info(f"Bot prefix: {bot._prefix}")
 
     # Test loading cogs
-    print("Loading cogs...")
+    log_info("Loading cogs...")
     bot.load_modules()
-    print("Cogs loaded.")
+    log_info("Cogs loaded.")
 
     # Test TwitchAPI initialization
-    print(f"TwitchAPI initialized with client_id: {bot.twitch_api.client_id}")
+    log_info(f"TwitchAPI initialized with client_id: {bot.twitch_api.client_id}")
 
     # Test token refresh
-    print("Testing token refresh...")
+    log_info("Testing token refresh...")
     try:
         await asyncio.wait_for(bot.ensure_valid_token(), timeout=10)
-        print("Token refresh complete.")
+        log_info("Token refresh complete.")
     except asyncio.TimeoutError:
-        print("Token refresh timed out.")
+        log_info("Token refresh timed out.")
     except Exception as e:
-        print(f"Error during token refresh: {e}")
+        log_info(f"Error during token refresh: {e}")
 
     # Give some time for cogs to initialize
     await asyncio.sleep(2)
@@ -38,9 +38,9 @@ async def run_manual_tests():
     # Cleanup
     try:
         await bot.close()
-        print("Bot closed successfully.")
+        log_info("Bot closed successfully.")
     except Exception as e:
-        print(f"Error during bot closure: {e}")
+        log_info(f"Error during bot closure: {e}")
 
     # Ensure all tasks are completed
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]

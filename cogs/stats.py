@@ -25,6 +25,7 @@ class Stats(commands.Cog):
             """
             )
             await db.commit()
+        log_info("User stats database setup complete")
 
     @commands.Cog.event()
     async def event_message(self, message):
@@ -63,49 +64,43 @@ class Stats(commands.Cog):
 
             user = user[0]
             user_id = str(user.id)
-        except Exception as e:
-            self.bot.logger.error(f"Error in stats command: {e}")
-            await ctx.send(f"@{ctx.author.name}, an error occurred while fetching user stats.")
 
-        try:
             channel_info = await self.bot.fetch_channels([user_id])
             channel_info = channel_info[0] if channel_info else None
-        except Exception as e:
-            log_error(f"Error fetching channel info: {e}")
-            channel_info = None
 
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT message_count, first_seen, last_seen FROM user_stats WHERE user_id = ?", (user_id,)
-            ) as cursor:
-                db_stats = await cursor.fetchone()
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    "SELECT message_count, first_seen, last_seen FROM user_stats WHERE user_id = ?", (user_id,)
+                ) as cursor:
+                    db_stats = await cursor.fetchone()
 
-        stats = []
-        stats.append(f"Stats for {user.display_name} (ID: {user.id}):")
-        stats.append(f"Account created: {format_time_ago(user.created_at)}")
+            stats = []
+            stats.append(f"Stats for {user.display_name} (ID: {user.id}):")
+            stats.append(f"Account created: {format_time_ago(user.created_at)}")
 
-        if channel_info and channel_info.game_name:
-            stats.append(f"Current game: {channel_info.game_name}")
+            if channel_info and channel_info.game_name:
+                stats.append(f"Current game: {channel_info.game_name}")
 
-        if channel_info and hasattr(channel_info, "language"):
-            stats.append(f"Language: {channel_info.language}")
+            if channel_info and hasattr(channel_info, "language"):
+                stats.append(f"Language: {channel_info.language}")
 
-        if db_stats:
-            message_count, first_seen, last_seen = db_stats
-            stats.append(f"Messages sent in this channel: {message_count}")
-            stats.append(f"First seen in this channel: {format_time_ago(first_seen)}")
-            stats.append(f"Last seen in this channel: {format_time_ago(last_seen)}")
-        else:
-            stats.append("No message history found in this channel.")
+            if db_stats:
+                message_count, first_seen, last_seen = db_stats
+                stats.append(f"Messages sent in this channel: {message_count}")
+                stats.append(f"First seen in this channel: {format_time_ago(first_seen)}")
+                stats.append(f"Last seen in this channel: {format_time_ago(last_seen)}")
+            else:
+                stats.append("No message history found in this channel.")
 
-        try:
             follows = await self.bot.fetch_followers(user_id, first=1)
             if follows:
                 stats.append(f"Followers: {follows.total}")
-        except Exception as e:
-            log_error(f"Error fetching follower count: {e}")
 
-        await ctx.send(" | ".join(stats))
+            await ctx.send(" | ".join(stats))
+            log_info(f"Stats command executed for user {username}")
+        except Exception as e:
+            log_error(f"Error in stats command: {e}")
+            await ctx.send(f"@{ctx.author.name}, an error occurred while fetching user stats.")
 
 
 def prepare(bot):

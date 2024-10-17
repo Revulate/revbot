@@ -3,7 +3,7 @@
 import random
 from twitchio.ext import commands
 import logging
-from utils import split_message  # Ensure this is correctly implemented
+from utils import split_message, get_logger  # Ensure get_logger is imported
 
 
 class Rate(commands.Cog):
@@ -11,7 +11,7 @@ class Rate(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.logger = logging.getLogger("twitch_bot.cogs.rate")  # Use child logger
+        self.logger = get_logger("twitch_bot.cogs.rate")  # Use child logger
 
     def get_mentioned_user(self, ctx: commands.Context, mentioned_user: str = None):
         """Helper method to extract a mentioned user or default to the command author."""
