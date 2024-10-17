@@ -151,16 +151,8 @@ jobs:
               script: "bot.py",
               interpreter: process.platform === "win32" ? "python" : "/home/actionsrunner/revbot/venv/bin/python",
               interpreter_args: "-u",  // Use unbuffered mode
-              watch: true,
-              ignore_watch: [
-                "node_modules",
-                "logs",
-                "*.log",
-                "*.db",
-                "*.db-journal",
-                ".git"
-              ],
-              instances: 1,  // Ensure only one instance is started
+              watch: false,  // Disable watch mode
+              instances: 1,  // Explicitly set to 1 instance
               exec_mode: "fork",
               max_memory_restart: "1G",
               env: {
@@ -181,9 +173,6 @@ jobs:
               autorestart: true,
               instance_var: 'INSTANCE_ID',
               merge_logs: true,
-              kill_timeout: 5000,
-              shutdown_with_message: true,
-              wait_ready: true,
               max_restarts: 10,
               min_uptime: "1m",
               listen_timeout: 8000,
@@ -191,11 +180,15 @@ jobs:
           }
           EOF
 
-          echo "Stopping any existing bot instances..."
-          pm2 stop twitch-bot || true
-          pm2 delete twitch-bot || true
+          echo "Forcefully stopping all existing bot instances..."
+          pm2 delete all --force || true
+          pm2 kill || true
+          
+          echo "Waiting for processes to fully stop..."
+          sleep 10
 
           echo "Starting bot with PM2..."
+          cd $REVUBOT_DIR
           pm2 start ecosystem.config.js
 
           echo "Saving PM2 process list..."
@@ -212,8 +205,8 @@ jobs:
             pm2 logs --lines 50
             echo "Rolling back to previous version..."
             if [ -d "$BACKUP_DIR" ]; then
-              pm2 stop twitch-bot || true
-              pm2 delete twitch-bot || true
+              pm2 delete all --force || true
+              pm2 kill || true
               rm -rf $REVUBOT_DIR
               mv $BACKUP_DIR $REVUBOT_DIR
               cd $REVUBOT_DIR
