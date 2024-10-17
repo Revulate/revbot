@@ -53,13 +53,23 @@ jobs:
         run: |
           python3.11 --version
           pip --version
-          node --version
-          npm --version
+          node --version || echo "Node.js not found"
+          npm --version || echo "npm not found"
           pm2 --version || echo "PM2 not found"
 
       - name: Deploy to Raspberry Pi
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          BOT_NICK: ${{ secrets.BOT_NICK }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          TWITCH_CHANNELS: ${{ secrets.TWITCH_CHANNELS }}
+          COMMAND_PREFIX: ${{ secrets.COMMAND_PREFIX }}
+          ADMIN_USERS: ${{ secrets.ADMIN_USERS }}
+          BOT_USER_ID: ${{ secrets.BOT_USER_ID }}
+          BROADCASTER_USER_ID: ${{ secrets.BROADCASTER_USER_ID }}
         run: |
           set -e
           echo "Starting deployment process..."
@@ -67,6 +77,18 @@ jobs:
           REVUBOT_DIR=$HOME/revbot
           REPO_URL=https://github.com/Revulate/revbot.git
           BACKUP_DIR=$HOME/revbot_backup_$(date +%Y%m%d_%H%M%S)
+
+          # Debug: Print environment variables (be careful not to expose sensitive information)
+          echo "TWITCH_CLIENT_ID is set: $([[ -n $TWITCH_CLIENT_ID ]] && echo 'Yes' || echo 'No')"
+          echo "TWITCH_CLIENT_SECRET is set: $([[ -n $TWITCH_CLIENT_SECRET ]] && echo 'Yes' || echo 'No')"
+          echo "BOT_NICK is set: $([[ -n $BOT_NICK ]] && echo 'Yes' || echo 'No')"
+          echo "ACCESS_TOKEN is set: $([[ -n $ACCESS_TOKEN ]] && echo 'Yes' || echo 'No')"
+          echo "REFRESH_TOKEN is set: $([[ -n $REFRESH_TOKEN ]] && echo 'Yes' || echo 'No')"
+          echo "TWITCH_CHANNELS is set: $([[ -n $TWITCH_CHANNELS ]] && echo 'Yes' || echo 'No')"
+          echo "COMMAND_PREFIX is set: $([[ -n $COMMAND_PREFIX ]] && echo 'Yes' || echo 'No')"
+          echo "ADMIN_USERS is set: $([[ -n $ADMIN_USERS ]] && echo 'Yes' || echo 'No')"
+          echo "BOT_USER_ID is set: $([[ -n $BOT_USER_ID ]] && echo 'Yes' || echo 'No')"
+          echo "BROADCASTER_USER_ID is set: $([[ -n $BROADCASTER_USER_ID ]] && echo 'Yes' || echo 'No')"
 
           # Backup current version
           if [ -d "$REVUBOT_DIR" ]; then
@@ -104,6 +126,20 @@ jobs:
           echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
           chmod 600 credentials.json
 
+          echo "Creating .env file..."
+          cat << EOF > .env
+          TWITCH_CLIENT_ID=$TWITCH_CLIENT_ID
+          TWITCH_CLIENT_SECRET=$TWITCH_CLIENT_SECRET
+          BOT_NICK=$BOT_NICK
+          ACCESS_TOKEN=$ACCESS_TOKEN
+          REFRESH_TOKEN=$REFRESH_TOKEN
+          TWITCH_CHANNELS=$TWITCH_CHANNELS
+          COMMAND_PREFIX=$COMMAND_PREFIX
+          ADMIN_USERS=$ADMIN_USERS
+          BOT_USER_ID=$BOT_USER_ID
+          BROADCASTER_USER_ID=$BROADCASTER_USER_ID
+          EOF
+
           echo "Checking Node.js and PM2..."
           node -v || echo "Node.js not found. Please install it manually."
           npm install pm2
@@ -116,14 +152,10 @@ jobs:
               name: "twitch-bot",
               script: "bot.py",
               interpreter: "$(which python)",
-              watch: true,
+              watch: false,
               ignore_watch: ["node_modules", "logs"],
               max_memory_restart: "1G",
               env: {
-                NODE_ENV: "development",
-                PYTHONUNBUFFERED: "1"
-              },
-              env_production: {
                 NODE_ENV: "production",
                 PYTHONUNBUFFERED: "1"
               }
@@ -172,3 +204,15 @@ jobs:
           fi
 
           echo "Deployment completed successfully"
+
+      - name: Cleanup old backups
+        run: |
+          find $HOME/revbot_backup_* -maxdepth 0 -type d -mtime +7 -exec rm -rf {} +
+
+      - name: Notify on success
+        if: success()
+        run: echo "Deployment successful"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "Deployment failed"
