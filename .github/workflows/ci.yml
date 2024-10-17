@@ -86,8 +86,11 @@ jobs:
             git checkout main
             git reset --hard origin/main
           else
-            echo "Cloning repository..."
-            git clone --branch main $REPO_URL .
+            echo "Initializing repository..."
+            git init
+            git remote add origin $REPO_URL
+            git fetch origin
+            git checkout -b main origin/main
           fi
 
           echo "Setting up Python environment..."
@@ -169,15 +172,3 @@ jobs:
           fi
 
           echo "Deployment completed successfully"
-
-      - name: Cleanup old backups
-        run: |
-          find $HOME/revbot_backup_* -maxdepth 0 -type d -mtime +7 -exec rm -rf {} +
-
-      - name: Notify on success
-        if: success()
-        run: echo "Deployment successful"
-
-      - name: Notify on failure
-        if: failure()
-        run: echo "Deployment failed"
