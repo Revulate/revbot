@@ -149,9 +149,9 @@ jobs:
             apps: [{
               name: "twitch-bot",
               script: "bot.py",
-              interpreter: "/home/actionsrunner/revbot/venv/bin/python",
-              interpreter_args: "-u",
-              watch: false,
+              interpreter: process.platform === "win32" ? "python" : "/home/actionsrunner/revbot/venv/bin/python",
+              interpreter_args: "-u",  // Use unbuffered mode
+              watch: true,
               ignore_watch: [
                 "node_modules",
                 "logs",
@@ -160,16 +160,22 @@ jobs:
                 "*.db-journal",
                 ".git"
               ],
+              instances: 1,  // Ensure only one instance is started
               exec_mode: "fork",
               max_memory_restart: "1G",
               env: {
+                NODE_ENV: "development",
+                PYTHONUNBUFFERED: "1",
+                PYTHONPATH: process.platform === "win32" ? "./env/Lib/site-packages" : "/home/actionsrunner/revbot/venv/lib/python3.11/site-packages"
+              },
+              env_production: {
                 NODE_ENV: "production",
                 PYTHONUNBUFFERED: "1",
-                PYTHONPATH: "/home/actionsrunner/revbot/venv/lib/python3.11/site-packages"
+                PYTHONPATH: process.platform === "win32" ? "./env/Lib/site-packages" : "/home/actionsrunner/revbot/venv/lib/python3.11/site-packages"
               },
-              env_file: "/home/actionsrunner/revbot/.env",
-              error_file: "/home/actionsrunner/revbot/logs/err.log",
-              out_file: "/home/actionsrunner/revbot/logs/out.log",
+              env_file: process.platform === "win32" ? ".env" : "/home/actionsrunner/revbot/.env",
+              error_file: process.platform === "win32" ? "./logs/err.log" : "/home/actionsrunner/revbot/logs/err.log",
+              out_file: process.platform === "win32" ? "./logs/out.log" : "/home/actionsrunner/revbot/logs/out.log",
               log_date_format: "YYYY-MM-DD HH:mm:ss Z",
               restart_delay: 5000,
               autorestart: true,
@@ -185,8 +191,11 @@ jobs:
           }
           EOF
 
-          echo "Starting/restarting bot with PM2..."
+          echo "Stopping any existing bot instances..."
+          pm2 stop twitch-bot || true
           pm2 delete twitch-bot || true
+
+          echo "Starting bot with PM2..."
           pm2 start ecosystem.config.js
 
           echo "Saving PM2 process list..."
@@ -194,14 +203,17 @@ jobs:
 
           echo "Performing health check..."
           sleep 30
-          if ! pm2 list | grep -q "online"; then
-            echo "Error: twitch-bot is not running after restart"
+          INSTANCE_COUNT=$(pm2 list | grep -c "twitch-bot")
+          if [ "$INSTANCE_COUNT" -ne 1 ]; then
+            echo "Error: Unexpected number of twitch-bot instances running: $INSTANCE_COUNT"
             echo "PM2 status:"
             pm2 list
             echo "PM2 logs:"
             pm2 logs --lines 50
             echo "Rolling back to previous version..."
             if [ -d "$BACKUP_DIR" ]; then
+              pm2 stop twitch-bot || true
+              pm2 delete twitch-bot || true
               rm -rf $REVUBOT_DIR
               mv $BACKUP_DIR $REVUBOT_DIR
               cd $REVUBOT_DIR
