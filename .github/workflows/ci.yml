@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted  # Runs directly on your Raspberry Pi
+    runs-on: self-hosted
 
     steps:
       - name: Checkout Repository
